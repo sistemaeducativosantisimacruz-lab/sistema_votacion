@@ -172,3 +172,26 @@ export async function updatePartyCandidatesAction(partyId: string, relationalIns
     return { error: err.message };
   }
 }
+
+export async function getCargosAction() {
+  try {
+    const { data: existingCargos, error } = await supabaseAdmin.from('cargos').select('*').order('created_at', { ascending: true });
+    if (error) throw error;
+    
+    if (!existingCargos || existingCargos.length === 0) {
+      const defaultCargos = [
+        { descripcion: 'Presidente' },
+        { descripcion: 'VicePresidente' },
+        { descripcion: 'Secretario(a)' },
+        { descripcion: 'Vocal' }
+      ];
+      const { data: newCargos, error: insertError } = await supabaseAdmin.from('cargos').insert(defaultCargos).select('*');
+      if (insertError) throw insertError;
+      return { data: newCargos };
+    }
+    
+    return { data: existingCargos };
+  } catch (err: any) {
+    return { error: err.message };
+  }
+}

@@ -10,7 +10,7 @@ import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { getAdminSessionAction, logoutAdminAction } from "@/app/actions/auth";
 import { getAdminsAction, createManualAdminAction, editManualAdminAction, demoteAdminAction, promoteStudentToComiteAction, updateCargoAction } from "@/app/actions/admin";
-import { deleteElectionAction, updateElectionStatusAction, deletePartyAction, updateStudentsVoteStatusAction, deleteVotesByElectionAction, insertMockVotesAction, insertElectionAction, upsertPartyAction, updateElectionDataAction, updatePartyCandidatesAction } from "@/app/actions/plantilla";
+import { deleteElectionAction, updateElectionStatusAction, deletePartyAction, updateStudentsVoteStatusAction, deleteVotesByElectionAction, insertMockVotesAction, insertElectionAction, upsertPartyAction, updateElectionDataAction, updatePartyCandidatesAction, getCargosAction } from "@/app/actions/plantilla";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -52,8 +52,8 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     const fetchCargos = async () => {
-      const { data } = await supabase.from('cargos').select('*').order('created_at', { ascending: true });
-      if (data) setCargos(data);
+      const result = await getCargosAction();
+      if (result.data) setCargos(result.data);
     };
     fetchCargos();
   }, []);
