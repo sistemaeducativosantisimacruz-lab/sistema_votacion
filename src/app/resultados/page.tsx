@@ -109,15 +109,14 @@ export default function ResultadosGeneralesPage() {
     }
 
     const totalStudents = filteredStudents.length;
-    const votedStudents = filteredStudents.filter(s => s.ya_voto).length;
-    setParticipation({
-      total: totalStudents,
-      voted: votedStudents,
-      percentage: totalStudents > 0 ? Number(((votedStudents / totalStudents) * 100).toFixed(4)) : 0
-    });
-
     const totalEmitidos = filteredVotes.length;
     setTotalVotes(totalEmitidos);
+
+    setParticipation({
+      total: totalStudents,
+      voted: totalEmitidos,
+      percentage: totalStudents > 0 ? Number(((totalEmitidos / totalStudents) * 100).toFixed(4)) : 0
+    });
 
     let processedResults: PartyResult[] = [];
 

@@ -28,6 +28,18 @@ export async function submitVoteAction(eleccionId: string, partidoId: string | n
       return { error: "Este estudiante ya ha emitido su voto." };
     }
 
+    // Verificar que la elección siga activa en este momento
+    const { data: election, error: electionErr } = await supabaseAdmin
+      .from("elecciones")
+      .select("esta_activa")
+      .eq("id", eleccionId)
+      .single();
+
+    if (electionErr || !election || !election.esta_activa) {
+      await clearVoterSession();
+      return { error: "La votación está cerrada o no se encuentra activa en este momento." };
+    }
+
     // Insertar el voto (Mantenemos la lógica de anonimato, solo registramos datos demográficos)
     const { error: voteErr } = await supabaseAdmin.from("votos").insert({
       eleccion_id: eleccionId,

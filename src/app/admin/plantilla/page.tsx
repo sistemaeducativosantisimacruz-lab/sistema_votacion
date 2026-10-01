@@ -1393,7 +1393,7 @@ export default function AdminDashboard() {
   const handleResetTestVotes = async () => {
     setLoading(true);
     try {
-      if (editingWorkspace === "simulacro") {
+      if (systemIsTestMode || editingWorkspace === "simulacro") {
         const { data: testElec } = await supabase.from("elecciones").select("id").ilike("titulo", "[PRUEBA]%").order("creado_en", { ascending: false }).limit(1).maybeSingle();
         if (testElec) {
           await deleteVotesByElectionAction(testElec.id);
@@ -1423,7 +1423,7 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       if (systemIsTestMode) {
-        // Apagar todas las elecciones (incluyendo las de prueba)
+        // Apagar todas las elecciones activas (incluyendo las de prueba)
         const { data: activeElecs } = await supabase.from("elecciones").select("id").eq("esta_activa", true);
         if (activeElecs && activeElecs.length > 0) {
           for (const elec of activeElecs) {
@@ -1431,13 +1431,9 @@ export default function AdminDashboard() {
           }
         }
         
-        // Resetear a todos los estudiantes (ya_voto = false)
-        await updateStudentsVoteStatusAction(false);
-        
-        // Al apagar el simulacro, dejamos la elección original apagada por defecto para que el usuario la inicie manualmente
         setIsOfficialElectionActive(false);
 
-        setPlantillaMessage({ type: 'success', text: "Modo de Prueba desactivado. Los votos de prueba han sido limpiados." });
+        setPlantillaMessage({ type: 'success', text: "Simulacro electoral detenido." });
       } else {
         // Iniciar Modo Prueba
         const { data: testElec } = await supabase.from("elecciones").select("id").ilike("titulo", "[PRUEBA]%").order("creado_en", { ascending: false }).limit(1).maybeSingle();
@@ -1490,6 +1486,8 @@ export default function AdminDashboard() {
             await deactivateElectionWithSnapshot(elec.id);
           }
         }
+        // Resetear padrón para iniciar la votación oficial limpia
+        await updateStudentsVoteStatusAction(false);
         // Encender la oficial
         await updateElectionStatusAction(electionId, true);
         setIsOfficialElectionActive(true);
