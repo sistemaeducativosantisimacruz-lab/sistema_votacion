@@ -3325,7 +3325,7 @@ export default function AdminDashboard() {
                     }}
                     className="w-full px-3 py-2.5 rounded-xl border border-border bg-background focus:border-primary focus:ring-1 focus:ring-primary outline-none text-sm transition-all"
                   >
-                    <option value="1ro">1ro (1ero)</option>
+                    <option value="1ro">1ro</option>
                     <option value="2do">2do</option>
                     <option value="3ro">3ro</option>
                     <option value="4to">4to</option>
