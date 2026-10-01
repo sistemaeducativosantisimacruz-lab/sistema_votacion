@@ -713,7 +713,7 @@ export default function AdminDashboard() {
       return;
     }
     if (!parsedStudentNames.apellidos || !parsedStudentNames.nombres) {
-      setNewStudentMessage({ type: 'error', text: 'Por favor, ingresa los datos del estudiante con el formato guía "Pellidos, Nombres".' });
+      setNewStudentMessage({ type: 'error', text: 'Por favor, ingresa los datos del estudiante con el formato guía "Apellidos, Nombres".' });
       return;
     }
     if (!newStudentGrado.trim()) {
@@ -3255,19 +3255,19 @@ export default function AdminDashboard() {
                     Estudiante <span className="text-destructive">*</span>
                   </label>
                   <span className="text-[11px] text-muted-foreground">
-                    Guía: <strong className="text-foreground">"Pellidos, Nombres"</strong>
+                    Guía: <strong className="text-foreground">"Apellidos, Nombres"</strong>
                   </span>
                 </div>
                 <input 
                   type="text" 
-                  placeholder="Pellidos, Nombres"
+                  placeholder="Apellidos, Nombres"
                   value={newStudentEstudiante}
                   onChange={(e) => setNewStudentEstudiante(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-background focus:border-primary focus:ring-1 focus:ring-primary outline-none text-sm transition-all"
                   required
                 />
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  Texto para guía: <span className="font-semibold text-primary">"Pellidos, Nombres"</span> (ejemplo: <em>Perez Quispe, Juan Carlos</em>)
+                  Texto para guía: <span className="font-semibold text-primary">"Apellidos, Nombres"</span> (ejemplo: <em>Perez Quispe, Juan Carlos</em>)
                 </p>
                 {newStudentEstudiante.trim() && (
                   <div className="mt-2 p-2 rounded-lg bg-secondary/50 border border-border text-xs flex flex-wrap gap-x-4 gap-y-1">
