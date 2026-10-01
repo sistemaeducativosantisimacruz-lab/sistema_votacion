@@ -713,7 +713,7 @@ export default function AdminDashboard() {
       return;
     }
     if (!parsedStudentNames.apellidos || !parsedStudentNames.nombres) {
-      setNewStudentMessage({ type: 'error', text: 'Por favor, ingresa los datos del estudiante con el formato guía "Apellidos, Nombres".' });
+      setNewStudentMessage({ type: 'error', text: 'Por favor, ingresa los datos del estudiante en formato "Apellidos, Nombres".' });
       return;
     }
     if (!newStudentGrado.trim()) {
@@ -3250,14 +3250,9 @@ export default function AdminDashboard() {
 
               {/* Campo Estudiante */}
               <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="block text-xs font-semibold text-foreground uppercase tracking-wider">
-                    Estudiante <span className="text-destructive">*</span>
-                  </label>
-                  <span className="text-[11px] text-muted-foreground">
-                    Guía: <strong className="text-foreground">"Apellidos, Nombres"</strong>
-                  </span>
-                </div>
+                <label className="block text-xs font-semibold text-foreground uppercase tracking-wider mb-1.5">
+                  Estudiante <span className="text-destructive">*</span>
+                </label>
                 <input 
                   type="text" 
                   placeholder="Apellidos, Nombres"
@@ -3266,9 +3261,6 @@ export default function AdminDashboard() {
                   className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-background focus:border-primary focus:ring-1 focus:ring-primary outline-none text-sm transition-all"
                   required
                 />
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Texto para guía: <span className="font-semibold text-primary">"Apellidos, Nombres"</span> (ejemplo: <em>Perez Quispe, Juan Carlos</em>)
-                </p>
                 {newStudentEstudiante.trim() && (
                   <div className="mt-2 p-2 rounded-lg bg-secondary/50 border border-border text-xs flex flex-wrap gap-x-4 gap-y-1">
                     <div>
@@ -3304,9 +3296,6 @@ export default function AdminDashboard() {
                     <option value="primaria">Primaria</option>
                     <option value="secundaria">Secundaria</option>
                   </select>
-                  <p className="text-[11px] text-muted-foreground mt-1 leading-tight">
-                    Guía: <span className="font-semibold text-foreground">"1ero, 2do, 3ro, 4to, 5to, 6to"</span>
-                  </p>
                 </div>
 
                 {/* Grado */}
@@ -3334,9 +3323,6 @@ export default function AdminDashboard() {
                       <option value="6to">6to</option>
                     )}
                   </select>
-                  <p className="text-[11px] text-muted-foreground mt-1 leading-tight">
-                    Grados: 1ero a {newStudentNivel === 'primaria' ? '6to' : '5to'}
-                  </p>
                 </div>
 
                 {/* Sección */}
@@ -3350,12 +3336,9 @@ export default function AdminDashboard() {
                     placeholder="En mayusculas"
                     value={newStudentSeccion}
                     onChange={(e) => setNewStudentSeccion(e.target.value.toUpperCase())}
-                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-background focus:border-primary focus:ring-1 focus:ring-primary outline-none text-sm transition-all uppercase font-semibold text-center"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-background focus:border-primary focus:ring-1 focus:ring-primary outline-none text-sm transition-all uppercase font-semibold text-center"
                     required
                   />
-                  <p className="text-[11px] text-muted-foreground mt-1 leading-tight">
-                    Guía: <span className="font-semibold text-foreground">"En mayusculas"</span>
-                  </p>
                 </div>
               </div>
 
