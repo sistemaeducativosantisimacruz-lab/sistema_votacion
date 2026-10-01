@@ -9,7 +9,7 @@ import { saveAs } from "file-saver";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { getAdminSessionAction, logoutAdminAction } from "@/app/actions/auth";
-import { getAdminsAction, createManualAdminAction, editManualAdminAction, demoteAdminAction, promoteStudentToComiteAction, updateCargoAction } from "@/app/actions/admin";
+import { getAdminsAction, createManualAdminAction, editManualAdminAction, demoteAdminAction, promoteStudentToComiteAction, updateCargoAction, createStudentAction } from "@/app/actions/admin";
 import { deleteElectionAction, updateElectionStatusAction, deletePartyAction, updateStudentsVoteStatusAction, deleteVotesByElectionAction, insertMockVotesAction, insertElectionAction, upsertPartyAction, updateElectionDataAction, updatePartyCandidatesAction, getCargosAction } from "@/app/actions/plantilla";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -82,6 +82,33 @@ export default function AdminDashboard() {
   const [includeVoteStatus, setIncludeVoteStatus] = useState(false);
   const [nivelesDisponibles, setNivelesDisponibles] = useState<string[]>([]);
   const [rawFilterData, setRawFilterData] = useState<any[]>([]);
+
+  // Nuevo Estudiante State
+  const [showNewStudentModal, setShowNewStudentModal] = useState(false);
+  const [newStudentDni, setNewStudentDni] = useState("");
+  const [newStudentEstudiante, setNewStudentEstudiante] = useState("");
+  const [newStudentNivel, setNewStudentNivel] = useState("primaria");
+  const [newStudentGrado, setNewStudentGrado] = useState("1ro");
+  const [newStudentSeccion, setNewStudentSeccion] = useState("");
+  const [newStudentLoading, setNewStudentLoading] = useState(false);
+  const [newStudentMessage, setNewStudentMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+
+  const parsedStudentNames = useMemo(() => {
+    const raw = newStudentEstudiante.trim();
+    if (!raw) return { apellidos: "", nombres: "" };
+    if (raw.includes(',')) {
+      const parts = raw.split(',');
+      return {
+        apellidos: parts[0].trim(),
+        nombres: parts.slice(1).join(',').trim()
+      };
+    }
+    const words = raw.split(/\s+/).filter(Boolean);
+    if (words.length <= 1) return { apellidos: raw, nombres: "" };
+    if (words.length === 2) return { apellidos: words[0], nombres: words[1] };
+    if (words.length === 3) return { apellidos: `${words[0]} ${words[1]}`, nombres: words[2] };
+    return { apellidos: `${words[0]} ${words[1]}`, nombres: words.slice(2).join(' ') };
+  }, [newStudentEstudiante]);
 
   // Filtros dinámicos Padrón
   const padronGradosDisponibles = useMemo(() => {
@@ -676,6 +703,66 @@ export default function AdminDashboard() {
       setPlantillaMessage({ type: 'error', text: 'Error al actualizar estudiante: ' + err.message });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCreateNewStudent = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!newStudentDni.trim()) {
+      setNewStudentMessage({ type: 'error', text: 'Por favor, ingresa el DNI del estudiante.' });
+      return;
+    }
+    if (!parsedStudentNames.apellidos || !parsedStudentNames.nombres) {
+      setNewStudentMessage({ type: 'error', text: 'Por favor, ingresa los datos del estudiante con el formato guía "Pellidos, Nombres".' });
+      return;
+    }
+    if (!newStudentGrado.trim()) {
+      setNewStudentMessage({ type: 'error', text: 'Por favor, selecciona o ingresa el grado.' });
+      return;
+    }
+    if (!newStudentSeccion.trim()) {
+      setNewStudentMessage({ type: 'error', text: 'Por favor, ingresa la sección en mayúsculas.' });
+      return;
+    }
+
+    setNewStudentLoading(true);
+    setNewStudentMessage(null);
+
+    try {
+      const res = await createStudentAction({
+        dni: newStudentDni.trim(),
+        apellidos: parsedStudentNames.apellidos,
+        nombres: parsedStudentNames.nombres,
+        nivel: newStudentNivel,
+        grado: newStudentGrado.trim(),
+        seccion: newStudentSeccion.trim().toUpperCase()
+      });
+
+      if (res.error) {
+        setNewStudentMessage({ type: 'error', text: res.error });
+        return;
+      }
+
+      setNewStudentMessage({ type: 'success', text: `¡Estudiante ${parsedStudentNames.apellidos}, ${parsedStudentNames.nombres} añadido con éxito al padrón!` });
+      
+      // Limpiar campos
+      setNewStudentDni("");
+      setNewStudentEstudiante("");
+      setNewStudentSeccion("");
+
+      // Actualizar filtros dinámicos y recargar resultados del padrón
+      await loadPadronFilters();
+      await handleSearchPadron(1);
+
+      setTimeout(() => {
+        setShowNewStudentModal(false);
+        setNewStudentMessage(null);
+      }, 1400);
+
+    } catch (err: any) {
+      setNewStudentMessage({ type: 'error', text: err.message || 'Error al guardar el estudiante.' });
+    } finally {
+      setNewStudentLoading(false);
     }
   };
 
@@ -1433,14 +1520,54 @@ export default function AdminDashboard() {
         const ws = wb.Sheets[wsname];
         const data = XLSX.utils.sheet_to_json(ws);
 
-        const formattedData = data.map((row: any) => ({
-          dni: String(row.DNI || row.dni || '').trim(),
-          nombres: String(row.Nombres || row.nombres || '').trim(),
-          apellidos: String(row.Apellidos || row.apellidos || '').trim(),
-          grado: String(row.Grado || row.grado || '').trim(),
-          seccion: String(row.Seccion || row.seccion || row.Sección || '').trim(),
-          nivel: String(row.Nivel || row.nivel || '').trim()
-        })).filter(s => s.dni && s.nombres && s.apellidos);
+        const formattedData = data.map((row: any) => {
+          let nombres = String(row.Nombres || row.nombres || '').trim();
+          let apellidos = String(row.Apellidos || row.apellidos || '').trim();
+
+          // Si viene columna Estudiante única (ej: "Perez Gomez, Juan")
+          if ((!nombres || !apellidos) && (row.Estudiante || row.estudiante)) {
+            const rawEstudiante = String(row.Estudiante || row.estudiante).trim();
+            if (rawEstudiante.includes(',')) {
+              const parts = rawEstudiante.split(',');
+              apellidos = parts[0].trim();
+              nombres = parts.slice(1).join(',').trim();
+            } else {
+              const words = rawEstudiante.split(/\s+/).filter(Boolean);
+              if (words.length >= 2) {
+                apellidos = `${words[0]} ${words[1] || ''}`.trim();
+                nombres = words.slice(2).join(' ') || words[1];
+              } else {
+                apellidos = rawEstudiante;
+                nombres = rawEstudiante;
+              }
+            }
+          }
+
+          let grado = String(row.Grado || row.grado || '').trim();
+          let seccion = String(row.Seccion || row.seccion || row.Sección || row.secc || row.Secc || '').trim().toUpperCase();
+          let nivel = String(row.Nivel || row.nivel || '').trim().toLowerCase();
+
+          if (!nivel) {
+            if (grado.includes("6") || grado.toLowerCase().includes("6to")) {
+              nivel = "primaria";
+            } else {
+              nivel = "secundaria";
+            }
+          } else if (nivel.includes("pri")) {
+            nivel = "primaria";
+          } else if (nivel.includes("sec")) {
+            nivel = "secundaria";
+          }
+
+          return {
+            dni: String(row.DNI || row.dni || '').trim(),
+            nombres,
+            apellidos,
+            grado,
+            seccion,
+            nivel
+          };
+        }).filter(s => s.dni && s.nombres && s.apellidos);
 
         if (formattedData.length === 0) {
           throw new Error("No se encontraron registros válidos en el archivo.");
@@ -2213,11 +2340,24 @@ export default function AdminDashboard() {
         {/* PADRON AND OTHERS TABS... */}
         {activeTab === 'padron' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <header className="mb-8 flex justify-between items-end">
+            <header className="mb-8 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
               <div>
                 <h1 className="text-3xl font-bold text-foreground">Padrón Electoral</h1>
                 <p className="text-muted-foreground mt-1">Gestiona y consulta la lista de estudiantes habilitados para votar.</p>
               </div>
+              {!isComite && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewStudentMessage(null);
+                    setShowNewStudentModal(true);
+                  }}
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md shadow-primary/20 self-start sm:self-auto cursor-pointer"
+                >
+                  <UserPlus className="w-5 h-5" />
+                  <span>Nuevo Estudiante</span>
+                </button>
+              )}
             </header>
 
             <div className="flex flex-col lg:flex-row gap-8">
@@ -2227,15 +2367,15 @@ export default function AdminDashboard() {
                   <div className="mb-6">
                     <h3 className="text-lg font-semibold mb-2">Cargar Excel</h3>
                     <p className="text-sm text-muted-foreground mb-4">
-                      Primera fila obligatoria:
+                      Columnas aceptadas (separadas o Estudiante):
                     </p>
                     <div className="flex gap-2 flex-wrap mb-4">
                       <span className="bg-secondary px-2 py-1 text-xs font-mono rounded-md border border-border">DNI</span>
-                      <span className="bg-secondary px-2 py-1 text-xs font-mono rounded-md border border-border">Nombres</span>
-                      <span className="bg-secondary px-2 py-1 text-xs font-mono rounded-md border border-border">Apellidos</span>
-                      <span className="bg-secondary px-2 py-1 text-xs font-mono rounded-md border border-border">Grado</span>
-                      <span className="bg-secondary px-2 py-1 text-xs font-mono rounded-md border border-border">Seccion</span>
+                      <span className="bg-secondary px-2 py-1 text-xs font-mono rounded-md border border-border">Nombres / Apellidos</span>
+                      <span className="bg-secondary px-2 py-1 text-xs font-mono rounded-md border border-border text-primary border-primary/30 bg-primary/10">Estudiante</span>
                       <span className="bg-secondary px-2 py-1 text-xs font-mono rounded-md border border-border text-primary border-primary/30 bg-primary/10">Nivel</span>
+                      <span className="bg-secondary px-2 py-1 text-xs font-mono rounded-md border border-border">Grado</span>
+                      <span className="bg-secondary px-2 py-1 text-xs font-mono rounded-md border border-border">Secc.</span>
                     </div>
                   </div>
 
@@ -3049,6 +3189,225 @@ export default function AdminDashboard() {
         )}
 
       </main>
+
+      {/* Modal Añadir Nuevo Estudiante */}
+      {showNewStudentModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-card border border-border w-full max-w-lg rounded-3xl p-6 sm:p-7 shadow-2xl scale-100 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-4 mb-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-foreground">
+                    Añadir Nuevo Estudiante
+                  </h2>
+                  <p className="text-xs text-muted-foreground">
+                    Ingresa los datos para registrarlo en la base de datos y padrón.
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => {
+                  setShowNewStudentModal(false);
+                  setNewStudentMessage(null);
+                }}
+                className="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-secondary transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            {newStudentMessage && (
+              <div className={`mb-4 p-3.5 rounded-xl text-sm flex items-start gap-2.5 animate-in fade-in ${newStudentMessage.type === 'error' ? 'bg-destructive/10 text-destructive border border-destructive/20' : 'bg-green-500/10 text-green-600 border border-green-500/20'}`}>
+                {newStudentMessage.type === 'error' ? (
+                  <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                ) : (
+                  <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
+                )}
+                <span>{newStudentMessage.text}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateNewStudent} className="space-y-4">
+              {/* Campo DNI */}
+              <div>
+                <label className="block text-xs font-semibold text-foreground uppercase tracking-wider mb-1.5">
+                  DNI <span className="text-destructive">*</span>
+                </label>
+                <input 
+                  type="text" 
+                  maxLength={12}
+                  placeholder="Número de DNI"
+                  value={newStudentDni}
+                  onChange={(e) => setNewStudentDni(e.target.value.replace(/\D/g, ''))}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-background focus:border-primary focus:ring-1 focus:ring-primary outline-none text-sm transition-all font-mono"
+                  required
+                />
+              </div>
+
+              {/* Campo Estudiante */}
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="block text-xs font-semibold text-foreground uppercase tracking-wider">
+                    Estudiante <span className="text-destructive">*</span>
+                  </label>
+                  <span className="text-[11px] text-muted-foreground">
+                    Guía: <strong className="text-foreground">"Pellidos, Nombres"</strong>
+                  </span>
+                </div>
+                <input 
+                  type="text" 
+                  placeholder="Pellidos, Nombres"
+                  value={newStudentEstudiante}
+                  onChange={(e) => setNewStudentEstudiante(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-background focus:border-primary focus:ring-1 focus:ring-primary outline-none text-sm transition-all"
+                  required
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Texto para guía: <span className="font-semibold text-primary">"Pellidos, Nombres"</span> (ejemplo: <em>Perez Quispe, Juan Carlos</em>)
+                </p>
+                {newStudentEstudiante.trim() && (
+                  <div className="mt-2 p-2 rounded-lg bg-secondary/50 border border-border text-xs flex flex-wrap gap-x-4 gap-y-1">
+                    <div>
+                      <span className="text-muted-foreground">Apellidos:</span>{" "}
+                      <span className="font-bold text-foreground">{parsedStudentNames.apellidos || '(esperando coma...)'}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Nombres:</span>{" "}
+                      <span className="font-bold text-foreground">{parsedStudentNames.nombres || '(esperando coma...)'}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Fila Nivel, Grado, Sección */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* Nivel */}
+                <div>
+                  <label className="block text-xs font-semibold text-foreground uppercase tracking-wider mb-1.5">
+                    Nivel <span className="text-destructive">*</span>
+                  </label>
+                  <select
+                    value={newStudentNivel}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setNewStudentNivel(val);
+                      if (val === 'secundaria' && newStudentGrado === '6to') {
+                        setNewStudentGrado('5to');
+                      }
+                    }}
+                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-background focus:border-primary focus:ring-1 focus:ring-primary outline-none text-sm transition-all capitalize"
+                  >
+                    <option value="primaria">Primaria</option>
+                    <option value="secundaria">Secundaria</option>
+                  </select>
+                  <p className="text-[11px] text-muted-foreground mt-1 leading-tight">
+                    Guía: <span className="font-semibold text-foreground">"1ero, 2do, 3ro, 4to, 5to, 6to"</span>
+                  </p>
+                </div>
+
+                {/* Grado */}
+                <div>
+                  <label className="block text-xs font-semibold text-foreground uppercase tracking-wider mb-1.5">
+                    Grado <span className="text-destructive">*</span>
+                  </label>
+                  <select
+                    value={newStudentGrado}
+                    onChange={(e) => {
+                      const g = e.target.value;
+                      setNewStudentGrado(g);
+                      if (g === '6to') {
+                        setNewStudentNivel('primaria');
+                      }
+                    }}
+                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-background focus:border-primary focus:ring-1 focus:ring-primary outline-none text-sm transition-all"
+                  >
+                    <option value="1ro">1ro (1ero)</option>
+                    <option value="2do">2do</option>
+                    <option value="3ro">3ro</option>
+                    <option value="4to">4to</option>
+                    <option value="5to">5to</option>
+                    {newStudentNivel === 'primaria' && (
+                      <option value="6to">6to</option>
+                    )}
+                  </select>
+                  <p className="text-[11px] text-muted-foreground mt-1 leading-tight">
+                    Grados: 1ero a {newStudentNivel === 'primaria' ? '6to' : '5to'}
+                  </p>
+                </div>
+
+                {/* Sección */}
+                <div>
+                  <label className="block text-xs font-semibold text-foreground uppercase tracking-wider mb-1.5">
+                    Secc. <span className="text-destructive">*</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    maxLength={3}
+                    placeholder="En mayusculas"
+                    value={newStudentSeccion}
+                    onChange={(e) => setNewStudentSeccion(e.target.value.toUpperCase())}
+                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-background focus:border-primary focus:ring-1 focus:ring-primary outline-none text-sm transition-all uppercase font-semibold text-center"
+                    required
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1 leading-tight">
+                    Guía: <span className="font-semibold text-foreground">"En mayusculas"</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Vista previa en padrón */}
+              <div className="p-3 rounded-2xl bg-secondary/30 border border-border text-xs space-y-1">
+                <span className="text-muted-foreground font-medium block">Previsualización en padrón:</span>
+                <div className="flex flex-wrap items-center gap-2 font-mono">
+                  <span className="bg-background px-2 py-0.5 rounded border border-border text-foreground font-bold">{newStudentDni || 'DNI'}</span>
+                  <span className="text-muted-foreground">|</span>
+                  <span className="text-foreground font-sans font-semibold">{parsedStudentNames.apellidos || 'APELLIDOS'}, {parsedStudentNames.nombres || 'NOMBRES'}</span>
+                  <span className="text-muted-foreground">|</span>
+                  <span className="bg-primary/10 text-primary px-2 py-0.5 rounded font-sans font-medium capitalize">{newStudentNivel}</span>
+                  <span className="text-muted-foreground">|</span>
+                  <span className="bg-background px-2 py-0.5 rounded border border-border text-foreground font-bold font-sans">{newStudentGrado} "{newStudentSeccion || 'SEC'}"</span>
+                </div>
+              </div>
+
+              {/* Botones */}
+              <div className="flex gap-3 pt-3">
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setShowNewStudentModal(false);
+                    setNewStudentMessage(null);
+                  }}
+                  disabled={newStudentLoading}
+                  className="flex-1 py-2.5 rounded-xl font-semibold border border-border hover:bg-secondary transition-colors text-sm disabled:opacity-50 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit"
+                  disabled={!newStudentDni || !parsedStudentNames.apellidos || !parsedStudentNames.nombres || !newStudentGrado || !newStudentSeccion || newStudentLoading}
+                  className="flex-1 bg-primary text-primary-foreground py-2.5 rounded-xl font-semibold hover:bg-primary/90 disabled:opacity-50 text-sm shadow-lg shadow-primary/20 flex items-center justify-center gap-2 cursor-pointer transition-all"
+                >
+                  {newStudentLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Guardando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-4 h-4" />
+                      <span>Guardar Estudiante</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal Crear/Editar Admin Manual */}
       {showManualAdminModal && (

@@ -173,3 +173,81 @@ export async function updateCargoAction(studentId: string, newCargo: string) {
     return { error: err.message };
   }
 }
+
+async function ensureAdmin() {
+  const session = await getAdminSession();
+  if (!session || !session.rol || !["superadmin", "administrador"].includes(session.rol)) {
+    throw new Error("No tienes permisos de administrador para realizar esta acción.");
+  }
+}
+
+export async function createStudentAction(studentData: {
+  dni: string;
+  nombres: string;
+  apellidos: string;
+  nivel: string;
+  grado: string;
+  seccion: string;
+}) {
+  try {
+    await ensureAdmin();
+
+    const dni = studentData.dni ? String(studentData.dni).trim() : '';
+    const nombres = studentData.nombres ? String(studentData.nombres).trim() : '';
+    const apellidos = studentData.apellidos ? String(studentData.apellidos).trim() : '';
+    let nivel = studentData.nivel ? String(studentData.nivel).trim().toLowerCase() : '';
+    const grado = studentData.grado ? String(studentData.grado).trim() : '';
+    const seccion = studentData.seccion ? String(studentData.seccion).trim().toUpperCase() : '';
+
+    if (!dni) throw new Error("El DNI es obligatorio.");
+    if (!nombres || !apellidos) throw new Error("Debe ingresar los apellidos y nombres del estudiante.");
+    if (!grado) throw new Error("El grado es obligatorio.");
+    if (!seccion) throw new Error("La sección es obligatoria.");
+
+    // Inferir o normalizar nivel si viene como texto
+    if (!nivel) {
+      if (grado.includes("6") || grado.toLowerCase().includes("6to")) {
+        nivel = "primaria";
+      } else {
+        nivel = "secundaria";
+      }
+    } else if (nivel.includes("pri")) {
+      nivel = "primaria";
+    } else if (nivel.includes("sec")) {
+      nivel = "secundaria";
+    }
+
+    // Verificar si ya existe estudiante con ese DNI
+    const { data: existing, error: checkErr } = await supabaseAdmin
+      .from('estudiantes')
+      .select('id, nombres, apellidos')
+      .eq('dni', dni)
+      .maybeSingle();
+
+    if (checkErr) throw checkErr;
+    if (existing) {
+      throw new Error(`El DNI ${dni} ya se encuentra registrado para el estudiante: ${existing.apellidos}, ${existing.nombres}.`);
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('estudiantes')
+      .insert([{
+        dni,
+        nombres,
+        apellidos,
+        nivel,
+        grado,
+        seccion,
+        rol: 'estudiante',
+        ya_voto: false
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err: any) {
+    return { error: err.message || "Error al registrar estudiante" };
+  }
+}
+
