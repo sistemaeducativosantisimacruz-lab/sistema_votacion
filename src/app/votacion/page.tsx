@@ -70,14 +70,28 @@ export default function VotacionPage() {
         }
         setElection(electionData);
 
-        const { data: partiesData, error: partiesErr } = await supabase
-          .from(partyTable)
-          .select("id, nombre, logo_url, nivel, numero_lista, candidatos")
-          .eq("eleccion_id", electionData.id);
+        const partyQuery = isApafa
+          ? supabase
+              .from("partidos_apafa")
+              .select("id, nombre, logo_url, numero_lista, candidatos")
+              .eq("eleccion_id", electionData.id)
+              .order("numero_lista", { ascending: true })
+          : supabase
+              .from("partidos")
+              .select("id, nombre, logo_url, nivel, numero_lista, candidatos")
+              .eq("eleccion_id", electionData.id)
+              .order("numero_lista", { ascending: true });
+
+        const { data: partiesData, error: partiesErr } = await partyQuery;
 
         if (partiesErr) throw partiesErr;
         
-        setParties(partiesData || []);
+        let finalParties = partiesData || [];
+        if (!isApafa && session.nivel) {
+          finalParties = finalParties.filter((p: any) => !p.nivel || p.nivel === 'general' || p.nivel?.toLowerCase() === session.nivel?.toLowerCase());
+        }
+
+        setParties(finalParties);
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -281,16 +295,13 @@ export default function VotacionPage() {
                   <h4 className="text-lg font-bold text-foreground leading-tight mb-2">{party.nombre}</h4>
 
                   {/* Si es APAFA y tiene candidatos directivos */}
-                  {Array.isArray(party.candidatos) && party.candidatos.length > 0 && (
+                  {Array.isArray(party.candidatos) && party.candidatos.filter((c: any) => c && c.nombre).length > 0 && (
                     <div className="w-full mt-3 pt-3 border-t border-border/50 text-left text-xs text-muted-foreground space-y-1">
-                      {party.candidatos.slice(0, 3).map((c: any, idx: number) => (
+                      {party.candidatos.filter((c: any) => c && c.nombre).slice(0, 3).map((c: any, idx: number) => (
                         <div key={idx} className="truncate">
                           <span className="font-semibold text-foreground">{c.cargo || 'Directivo'}:</span> {c.nombre}
                         </div>
                       ))}
-                      {party.candidatos.length > 3 && (
-                        <p className="text-[10px] text-primary italic">+{party.candidatos.length - 3} integrantes más</p>
-                      )}
                     </div>
                   )}
                 </div>
