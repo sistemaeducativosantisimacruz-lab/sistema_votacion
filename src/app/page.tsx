@@ -31,8 +31,8 @@ export default function StudentLogin() {
     initMode();
   }, []);
 
-  const [activeYear, setActiveYear] = useState("");
-  const [activeName, setActiveName] = useState("");
+  const [activeYear, setActiveYear] = useState("2027");
+  const [activeName, setActiveName] = useState("ELECCIONES ESCOLARES");
   const [isSimulacroMode, setIsSimulacroMode] = useState(false);
   const [officialElection, setOfficialElection] = useState<any>(null);
   const [simulacroElection, setSimulacroElection] = useState<any>(null);
@@ -68,8 +68,8 @@ export default function StudentLogin() {
             setActiveYear(new Date().getFullYear().toString());
           }
         } else {
-          setActiveName(votingMode === "apafa" ? "APAFA" : "");
-          setActiveYear(new Date().getFullYear().toString());
+          setActiveName(votingMode === "apafa" ? "ELECCIONES APAFA" : "ELECCIONES ESCOLARES");
+          setActiveYear(votingMode === "apafa" ? "2026" : "2027");
         }
 
         // Elección Simulacro
@@ -92,6 +92,21 @@ export default function StudentLogin() {
 
     fetchElections();
   }, [votingMode]);
+
+  const displayWords = (() => {
+    if (votingMode === "apafa") {
+      return ["ELECCIONES", "APAFA"];
+    }
+    if (activeName) {
+      const clean = activeName.toUpperCase().replace(/\s+/g, " ").trim();
+      const parts = clean.split(" ");
+      if (parts.length >= 2) {
+        return [parts[0], parts.slice(1).join(" ")];
+      }
+      return ["ELECCIONES", parts[0] || "ESCOLARES"];
+    }
+    return ["ELECCIONES", "ESCOLARES"];
+  })();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -210,7 +225,7 @@ export default function StudentLogin() {
                 </div>
                 
                 <h1 className="text-2xl lg:text-3xl font-bold text-foreground mb-2 text-center">
-                  Portal de Votación {votingMode === "apafa" ? "APAFA" : ""} {isSimulacroMode && <span className="text-amber-500 block text-lg mt-1">(Simulacro)</span>}
+                  Portal de Votación {isSimulacroMode && <span className="text-amber-500 block text-lg mt-1">(Simulacro)</span>}
                 </h1>
                 <p className="text-muted-foreground text-center mb-8 text-sm lg:text-base px-2">
                   {votingMode === "apafa" 
@@ -289,20 +304,17 @@ export default function StudentLogin() {
           </div>
         </div>
 
-        {/* Grupo Derecho: Texto de Fondo Decorativo */}
-        {activeYear && (
-          <div className="hidden lg:flex flex-col items-center justify-center font-black select-none pointer-events-none z-0 flex-shrink min-w-[250px]">
-            {activeName && (
-               <div className="text-[clamp(1.5rem,2.5vw,3rem)] text-[#13439c]/50 tracking-widest uppercase mb-4 text-center text-balance leading-tight">
-                 {activeName}
-               </div>
-            )}
-            <div className="flex flex-col items-center text-[clamp(6rem,12vw,14rem)] leading-[0.75] tracking-tighter text-[#13439c]/25 tabular-nums">
-              <span>{activeYear.slice(0, 2)}</span>
-              <span>{activeYear.slice(2, 4)}</span>
-            </div>
+        {/* Grupo Derecho: Texto de Fondo Decorativo con dimensiones y anchos fijos */}
+        <div className="hidden lg:flex flex-col items-center justify-center font-black select-none pointer-events-none z-0 flex-shrink-0 w-[280px] xl:w-[340px]">
+          <div className="text-[clamp(1.5rem,2.5vw,3rem)] text-[#13439c]/50 tracking-widest uppercase mb-4 text-center leading-tight flex flex-col items-center">
+            <span>{displayWords[0]}</span>
+            <span>{displayWords[1]}</span>
           </div>
-        )}
+          <div className="flex flex-col items-center text-[clamp(6rem,12vw,14rem)] leading-[0.75] tracking-tighter text-[#13439c]/25 tabular-nums">
+            <span>{(activeYear || (votingMode === "apafa" ? "2026" : "2027")).slice(0, 2)}</span>
+            <span>{(activeYear || (votingMode === "apafa" ? "2026" : "2027")).slice(2, 4)}</span>
+          </div>
+        </div>
         
       </div>
     </main>
