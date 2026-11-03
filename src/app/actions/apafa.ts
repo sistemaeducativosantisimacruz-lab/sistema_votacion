@@ -452,16 +452,23 @@ export async function uploadPadronApafaAction(apoderadosList: any[]) {
       // Ignorar si aún no existe la tabla
     }
 
-    // 2. Fusionar datos entrantes con existentes
+    // 2. Mapear incoming familia_id a canonical existing familia_id si alguno de los miembros ya existe en BD
+    const incomingToCanonicalFamiliaId = new Map<string, string>();
+    for (const ap of apoderadosList) {
+      const existing = existingMap.get(ap.dni);
+      if (existing && existing.familia_id) {
+        incomingToCanonicalFamiliaId.set(ap.familia_id, existing.familia_id);
+      }
+    }
+
+    // 3. Fusionar datos entrantes con existentes
     const mergedList = apoderadosList.map(ap => {
       const existing = existingMap.get(ap.dni);
-      let familiaId = ap.familia_id;
+      // Usar familia_id canónico si algún miembro de la familia ya existía en la BD
+      let familiaId = incomingToCanonicalFamiliaId.get(ap.familia_id) || existing?.familia_id || ap.familia_id;
       let hijos = ap.hijos;
 
       if (existing) {
-        // Mantener el familia_id existente para no desasociar la unidad familiar
-        familiaId = existing.familia_id || ap.familia_id;
-
         // Fusionar la lista de hijos (evitando duplicar cadenas idénticas)
         const currentHijos = (existing.hijos || "").split(";").map((h: string) => h.trim()).filter(Boolean);
         const incomingHijos = (ap.hijos || "").split(";").map((h: string) => h.trim()).filter(Boolean);
