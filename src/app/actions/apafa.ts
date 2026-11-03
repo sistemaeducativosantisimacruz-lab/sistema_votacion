@@ -1,14 +1,16 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getAdminSession, getVoterSession, clearVoterSession, setVoterSession } from "@/lib/auth";
 
-// Helper para verificar superadmin
+// Helper para verificar permisos de administración (superadmin o admin)
 async function ensureSuperAdmin() {
   const session = await getAdminSession();
-  if (!session || session.rol !== "superadmin") {
-    throw new Error("No tienes permisos de superadmin para realizar esta acción.");
+  if (!session || (session.rol !== "superadmin" && session.rol !== "admin")) {
+    throw new Error("No tienes permisos de administrador para realizar esta acción.");
   }
+  return session;
 }
 
 // -------------------------------------------------------------
@@ -686,6 +688,19 @@ export async function getProgresoApafaDataAction() {
 
 export async function getSystemVotingModeAction(): Promise<{ modo: "escolar" | "apafa" }> {
   try {
+    // 1. Intentar leer desde cookies primero para SSR ultrarrápido
+    try {
+      const cookieStore = await cookies();
+      const cookieMode = cookieStore.get("public_voting_mode")?.value;
+      if (cookieMode === "apafa" || cookieMode === "escolar") {
+        // Retornamos el modo de la cookie pero sincronizamos con DB si es posible
+        return { modo: cookieMode };
+      }
+    } catch (e) {
+      // Ignorar si cookies() no está disponible en este contexto
+    }
+
+    // 2. Consultar tabla de configuración en Supabase
     const { data, error } = await supabaseAdmin
       .from("configuracion_sistema")
       .select("valor")
@@ -698,7 +713,7 @@ export async function getSystemVotingModeAction(): Promise<{ modo: "escolar" | "
       }
     }
 
-    // Fallback si la tabla aún no existe: inferir por elección activa
+    // 3. Fallback si la tabla aún no existe: inferir por elección activa
     const { data: apafaActive } = await supabaseAdmin
       .from("elecciones_apafa")
       .select("id")
@@ -733,6 +748,18 @@ export async function setSystemVotingModeAction(modo: "escolar" | "apafa") {
         throw new Error("La tabla configuracion_sistema aún no existe en Supabase. Ejecuta el script supabase_apafa.sql.");
       }
       throw error;
+    }
+
+    // Guardar también en cookies para que SSR en la ruta raíz '/' lo lea al instante en cada recarga
+    try {
+      const cookieStore = await cookies();
+      cookieStore.set("public_voting_mode", modo, {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365, // 1 año
+        sameSite: "lax",
+      });
+    } catch (e) {
+      // Continuar si la cookie no pudo ser escrita
     }
 
     return { success: true, modo };

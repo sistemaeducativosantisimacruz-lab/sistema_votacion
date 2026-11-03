@@ -55,11 +55,13 @@ export default function AdminDashboard() {
     setSystemScope(scope);
     sessionStorage.setItem("admin_system_scope", scope);
     try {
-      if (isSuperAdmin) {
-        await setSystemVotingModeAction(scope);
-        setScopeMessage(`Modo cambiado a ${scope === "apafa" ? "Votación APAFA" : "Votación Escolar"} en todo el sistema.`);
-        setTimeout(() => setScopeMessage(null), 4000);
+      const res = await setSystemVotingModeAction(scope);
+      if (res?.success) {
+        setScopeMessage(`✓ Vista predeterminada del portal de votación configurada a: ${scope === "apafa" ? "Elecciones APAFA" : "Elecciones Escolares"}. La página principal (/) y los quioscos se sincronizan automáticamente cada 1 minuto.`);
+      } else if (res?.error) {
+        setScopeMessage(`Aviso: ${res.error}`);
       }
+      setTimeout(() => setScopeMessage(null), 5000);
     } catch (e: any) {
       console.error("Error setting system voting mode:", e);
     }
@@ -2062,16 +2064,19 @@ export default function AdminDashboard() {
 
       {/* Main Content */}
       <main className="flex-1 p-4 md:p-8 pb-24 md:pb-8 overflow-y-auto flex flex-col">
-        {/* Selector de Modo: Escolar vs APAFA */}
-        <div className="w-full mb-6 p-4 bg-card border border-border rounded-2xl shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full md:w-auto">
+        {/* Selector de Modo y Vista Predeterminada del Portal */}
+        <div className="w-full mb-6 p-4 md:p-5 bg-card border border-border rounded-2xl shadow-sm flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+          <div className="flex flex-col gap-2 w-full lg:w-auto">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
               <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Modo de Votación del Sistema:
+                Vista Predeterminada del Portal de Votación (Ruta /)
               </span>
             </div>
-            <div className="inline-flex p-1 bg-secondary/80 rounded-xl border border-border/80">
+            <p className="text-xs text-muted-foreground">
+              Define qué pantalla verán los electores al ingresar al portal y cada vez que el quiosco se reinicie automáticamente (cada 1 min).
+            </p>
+            <div className="inline-flex p-1 bg-secondary/80 rounded-xl border border-border/80 w-fit mt-1">
               <button
                 onClick={() => handleSystemScopeChange("escolar")}
                 className={`px-4 py-2 rounded-lg text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${
@@ -2095,14 +2100,21 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
-            <span className="text-xs text-muted-foreground hidden lg:inline">
-              {systemScope === "escolar" 
-                ? "Portal público configurado para elecciones escolares." 
-                : "Portal público configurado para elecciones de APAFA."}
-            </span>
+          <div className="flex items-center gap-4 w-full lg:w-auto justify-between lg:justify-end border-t lg:border-t-0 pt-3 lg:pt-0 border-border">
+            <div className="flex flex-col items-start lg:items-end">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                Vista Activa al Cargar / Refrescar:
+              </span>
+              <span className={`text-xs font-bold mt-0.5 px-2.5 py-1 rounded-md ${
+                systemScope === "apafa" 
+                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30" 
+                  : "bg-primary/10 text-primary border border-primary/20"
+              }`}>
+                {systemScope === "escolar" ? "Elecciones Escolares (Estudiantes)" : "Elecciones APAFA (Padres de Familia)"}
+              </span>
+            </div>
             {currentUser && (
-              <div className="flex items-center gap-2 text-xs bg-secondary/50 px-3 py-1.5 rounded-xl border border-border">
+              <div className="flex items-center gap-2 text-xs bg-secondary/50 px-3 py-1.5 rounded-xl border border-border shrink-0">
                 <span className="font-semibold">{currentUser.nombres} {currentUser.apellidos}</span>
                 <span className="text-muted-foreground">|</span>
                 <span className="font-bold uppercase tracking-wider text-primary">
