@@ -14,7 +14,7 @@ type PartyResult = {
 
 export default function ResultadosGeneralesPage() {
   const [resultMode, setResultMode] = useState<"escolar" | "apafa">("escolar");
-  const [viewMode, setViewMode] = useState<"horizontal" | "vertical">("vertical");
+  const [viewMode, setViewMode] = useState<"barras" | "columnas">("barras");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -277,22 +277,25 @@ export default function ResultadosGeneralesPage() {
               </div>
 
               {/* Botón cambiar orientación de gráficos */}
-              <div className="flex bg-secondary p-1 rounded-xl w-full md:w-auto justify-center">
+              {/* Botón cambiar orientación de gráficos */}
+              <div className="flex bg-secondary p-1 rounded-xl w-full md:w-auto justify-center border border-border">
                 <button
-                  onClick={() => setViewMode("vertical")}
-                  className={`p-2 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-semibold ${
-                    viewMode === "vertical" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  type="button"
+                  onClick={() => setViewMode("barras")}
+                  className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
+                    viewMode === "barras" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                   }`}
-                  title="Gráfico Horizontal"
+                  title="Gráfico de Barras Horizontales"
                 >
                   <BarChart3 className="w-4 h-4 rotate-90" /> Barras
                 </button>
                 <button
-                  onClick={() => setViewMode("horizontal")}
-                  className={`p-2 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-semibold ${
-                    viewMode === "horizontal" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  type="button"
+                  onClick={() => setViewMode("columnas")}
+                  className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
+                    viewMode === "columnas" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                   }`}
-                  title="Gráfico de Columnas"
+                  title="Gráfico de Columnas Verticales"
                 >
                   <BarChart3 className="w-4 h-4" /> Columnas
                 </button>
@@ -340,35 +343,138 @@ export default function ResultadosGeneralesPage() {
               </div>
             </div>
 
-            {/* Listado de Resultados */}
-            <div className="space-y-4">
-              {results.map((r, idx) => (
-                <div key={r.id || idx} className="bg-card border border-border p-5 rounded-2xl shadow-sm flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <span className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center font-bold text-xs text-muted-foreground">
-                      #{idx + 1}
-                    </span>
-                    {r.logo_url && (
-                      <img src={r.logo_url} alt="" className="w-10 h-10 rounded-xl object-cover bg-white" />
-                    )}
-                    <div>
-                      <h3 className="font-bold text-base text-foreground">{r.nombre}</h3>
-                      <p className="text-xs text-muted-foreground">{r.votos} votos registrados</p>
-                    </div>
+            {/* Visualización de Resultados: Columnas o Barras */}
+            {viewMode === "columnas" ? (
+              <div className="bg-card border border-border rounded-3xl p-6 sm:p-8 shadow-sm animate-in fade-in zoom-in-95 duration-300 mb-6">
+                <div className="flex items-center justify-between mb-8 pb-4 border-b border-border">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5 text-primary" />
+                    <h3 className="font-bold text-lg text-foreground">Distribución en Columnas</h3>
                   </div>
+                  <span className="text-xs font-semibold text-muted-foreground font-mono">
+                    Total: {totalVotes} votos emitidos
+                  </span>
+                </div>
 
-                  <div className="text-right">
-                    <p className="text-2xl font-black text-foreground">{r.porcentaje.toFixed(1)}%</p>
-                    <div className="w-32 h-2 bg-secondary rounded-full overflow-hidden mt-1">
-                      <div
-                        className={`h-full ${r.id === "blanco" ? "bg-gray-400" : "bg-primary"}`}
-                        style={{ width: `${r.porcentaje}%` }}
-                      />
-                    </div>
+                {/* Contenedor de Gráfico de Columnas */}
+                <div className="relative pt-6 pb-2">
+                  <div className="flex items-end justify-center gap-3 sm:gap-6 min-h-[300px] h-72 px-2 relative z-10 border-b border-border pb-2">
+                    {results.map((r, idx) => {
+                      const maxPercentage = Math.max(...results.map(x => x.porcentaje), 1);
+                      const heightPercent = totalVotes > 0 ? Math.max((r.porcentaje / maxPercentage) * 100, 8) : 8;
+                      const isBlanco = r.id === "blanco";
+                      const isFirst = idx === 0 && r.votos > 0;
+
+                      return (
+                        <div
+                          key={r.id || idx}
+                          className="flex-1 max-w-[150px] flex flex-col items-center h-full justify-end group"
+                        >
+                          {/* Datos numéricos encima de la columna */}
+                          <div className="mb-2 text-center transition-transform group-hover:-translate-y-1 duration-200">
+                            <span className="text-xs sm:text-sm font-black text-foreground block">
+                              {r.porcentaje.toFixed(1)}%
+                            </span>
+                            <span className="text-[10px] sm:text-[11px] font-mono text-muted-foreground block">
+                              {r.votos} {r.votos === 1 ? 'voto' : 'votos'}
+                            </span>
+                          </div>
+
+                          {/* Columna Vertical */}
+                          <div className="w-full bg-secondary/50 rounded-2xl p-1 flex items-end justify-center h-48 shadow-inner">
+                            <div
+                              className={`w-full rounded-xl transition-all duration-700 ease-out shadow-md ${
+                                isBlanco
+                                  ? "bg-slate-500"
+                                  : resultMode === "apafa"
+                                  ? isFirst
+                                    ? "bg-amber-600 ring-2 ring-amber-400/50"
+                                    : "bg-amber-700"
+                                  : isFirst
+                                  ? "bg-primary ring-2 ring-primary/40"
+                                  : "bg-primary/80"
+                              }`}
+                              style={{ height: `${heightPercent}%` }}
+                            />
+                          </div>
+
+                          {/* Pie de columna con logo, puesto y nombre */}
+                          <div className="mt-3 flex flex-col items-center text-center w-full">
+                            <div className="relative mb-1">
+                              {r.logo_url ? (
+                                <img
+                                  src={r.logo_url}
+                                  alt=""
+                                  className="w-10 h-10 rounded-xl object-cover bg-white border border-border shadow-sm"
+                                />
+                              ) : (
+                                <div className="w-10 h-10 rounded-xl bg-secondary border border-border flex items-center justify-center font-bold text-xs text-muted-foreground">
+                                  #{idx + 1}
+                                </div>
+                              )}
+                              {isFirst && !isBlanco && (
+                                <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 text-amber-950 font-black text-[9px] rounded-full flex items-center justify-center shadow">
+                                  1
+                                </span>
+                              )}
+                            </div>
+                            <h4 className="font-bold text-xs sm:text-sm text-foreground line-clamp-2 max-w-[130px] leading-tight">
+                              {r.nombre}
+                            </h4>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            ) : (
+              /* Modo Barras Horizontales */
+              <div className="space-y-4 animate-in fade-in duration-300 mb-6">
+                {results.map((r, idx) => {
+                  const isFirst = idx === 0 && r.votos > 0;
+                  const isBlanco = r.id === "blanco";
+
+                  return (
+                    <div
+                      key={r.id || idx}
+                      className="bg-card border border-border p-5 rounded-2xl shadow-sm flex items-center justify-between gap-4 hover:border-primary/40 transition-colors"
+                    >
+                      <div className="flex items-center gap-4 min-w-0">
+                        <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                          isFirst ? "bg-amber-500/20 text-amber-600 dark:text-amber-400 font-black" : "bg-secondary text-muted-foreground"
+                        }`}>
+                          #{idx + 1}
+                        </span>
+                        {r.logo_url && (
+                          <img src={r.logo_url} alt="" className="w-10 h-10 rounded-xl object-cover bg-white border border-border shrink-0" />
+                        )}
+                        <div className="min-w-0">
+                          <h3 className="font-bold text-base text-foreground truncate">{r.nombre}</h3>
+                          <p className="text-xs text-muted-foreground">{r.votos} {r.votos === 1 ? 'voto registrado' : 'votos registrados'}</p>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <p className="text-2xl font-black text-foreground">{r.porcentaje.toFixed(1)}%</p>
+                        <div className="w-32 sm:w-48 h-2.5 bg-secondary rounded-full overflow-hidden mt-1.5 p-0.5 shadow-inner">
+                          <div
+                            className={`h-full rounded-full transition-all duration-700 ease-out ${
+                              isBlanco 
+                                ? "bg-gray-400" 
+                                : resultMode === "apafa" 
+                                ? "bg-amber-600" 
+                                : "bg-primary"
+                            }`}
+                            style={{ width: `${Math.min(r.porcentaje, 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </>
         )}
       </header>

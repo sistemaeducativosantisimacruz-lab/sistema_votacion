@@ -21,7 +21,8 @@ import {
   getProgresoApafaDataAction,
   getCargosApafaAction,
   searchApoderadosAction,
-  saveSingleApafaPartyAction
+  saveSingleApafaPartyAction,
+  generateMockVotesApafaAction
 } from "@/app/actions/apafa";
 import { parseApafaWorkbook, parseApafaWorkbooks } from "@/lib/apafaExcelParser";
 
@@ -669,7 +670,7 @@ export default function ApafaAdminView({
     }
   };
 
-  // 9. Generar votos simulados para APAFA
+  // 9. Generar votos simulados para APAFA vinculados al padrón real de familias
   const handleGenerateMockVotes = async () => {
     if (!activeElection || !activeElection.id) {
       setMessage({ type: "error", text: "Debe haber una elección de simulacro de APAFA activa para generar votos." });
@@ -679,25 +680,23 @@ export default function ApafaAdminView({
     setIsGeneratingMock(true);
     setMessage(null);
     try {
-      const partyOptions = parties.map(p => p.id);
-      partyOptions.push(null as any); // Voto en blanco
+      const res = await generateMockVotesApafaAction(activeElection.id, 40);
+      if (res.error) throw new Error(res.error);
 
-      const mockVotes = [];
-      for (let i = 0; i < 40; i++) {
-        const randomParty = partyOptions[Math.floor(Math.random() * partyOptions.length)];
-        mockVotes.push({
-          eleccion_id: activeElection.id,
-          partido_id: randomParty,
-          familia_id: `FAM-MOCK-${i + 1}`,
-          nivel_votante: i % 2 === 0 ? "primaria" : "secundaria",
-          grado_votante: `${(i % 5) + 1}°`,
-          seccion_votante: ["A", "B", "C"][i % 3]
+      if (res.success) {
+        setMessage({
+          type: "success",
+          text: `¡Se generaron ${res.votosGenerados} votos de prueba con familias reales del padrón! (Familias pendientes: ${res.familiasRestantes})`
+        });
+      } else {
+        setMessage({
+          type: "error",
+          text: res.message || "No se pudieron generar más votos de prueba."
         });
       }
 
-      await insertMockVotesApafaAction(mockVotes);
-      setMessage({ type: "success", text: "¡Se generaron 40 votos de prueba en el simulacro de APAFA!" });
       if (activeTab === "progreso") loadProgreso();
+      if (activeTab === "padron") loadPadron();
     } catch (err: any) {
       setMessage({ type: "error", text: err.message });
     } finally {

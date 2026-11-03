@@ -586,6 +586,108 @@ export async function insertMockVotesApafaAction(votesChunk: any[]) {
   }
 }
 
+export async function generateMockVotesApafaAction(electionId: string, count: number = 40) {
+  try {
+    await ensureSuperAdmin();
+
+    // 1. Obtener partidos de esta elección
+    const { data: partiesData, error: partyErr } = await supabaseAdmin
+      .from("partidos_apafa")
+      .select("id")
+      .eq("eleccion_id", electionId);
+
+    if (partyErr) throw partyErr;
+    const partyIds = (partiesData || []).map(p => p.id);
+
+    // 2. Obtener apoderados reales de la base de datos
+    const { data: apoderados, error: apoErr } = await supabaseAdmin
+      .from("apoderados")
+      .select("id, dni, nombres, apellidos, parentesco, familia_id, ya_voto, nivel, grado, seccion")
+      .order("creado_en", { ascending: true });
+
+    if (apoErr) throw apoErr;
+
+    if (!apoderados || apoderados.length === 0) {
+      throw new Error("No hay apoderados registrados en el padrón de APAFA. Sube primero el archivo Excel del Padrón.");
+    }
+
+    // 3. Agrupar por familia_id
+    const familiasMap = new Map<string, any[]>();
+    for (const a of apoderados) {
+      if (!familiasMap.has(a.familia_id)) {
+        familiasMap.set(a.familia_id, []);
+      }
+      familiasMap.get(a.familia_id)!.push(a);
+    }
+
+    // Filtrar familias que aún no han votado
+    const familiasPendientes = Array.from(familiasMap.entries()).filter(([_, members]) => {
+      return !members.some(m => m.ya_voto);
+    });
+
+    if (familiasPendientes.length === 0) {
+      return { 
+        success: false, 
+        message: "Todas las familias del padrón de APAFA ya han votado en esta simulación. Utiliza 'Limpiar Votos' si deseas reiniciar la prueba." 
+      };
+    }
+
+    // Tomar el lote de familias
+    const familiasASeleccionar = familiasPendientes.slice(0, count);
+
+    const mockVotes: any[] = [];
+    const updatesPorFamilia: Array<{ familia_id: string; detalle: string }> = [];
+
+    for (const [famId, members] of familiasASeleccionar) {
+      const chosenParent = members[Math.floor(Math.random() * members.length)];
+      
+      // Decidir voto (10% en blanco / nulo, 90% a algún partido registrado)
+      const isBlank = Math.random() < 0.1 || partyIds.length === 0;
+      const randomPartyId = isBlank ? null : partyIds[Math.floor(Math.random() * partyIds.length)];
+
+      mockVotes.push({
+        eleccion_id: electionId,
+        partido_id: randomPartyId,
+        familia_id: famId,
+        nivel_votante: chosenParent.nivel || "secundaria",
+        grado_votante: chosenParent.grado || "1°",
+        seccion_votante: chosenParent.seccion || "A"
+      });
+
+      updatesPorFamilia.push({
+        familia_id: famId,
+        detalle: `Votó (Simulacro) ${chosenParent.parentesco || 'Apoderado'}: ${chosenParent.apellidos}, ${chosenParent.nombres} (DNI ${chosenParent.dni})`
+      });
+    }
+
+    // 4. Insertar votos en votos_apafa
+    const { error: insVotesErr } = await supabaseAdmin
+      .from("votos_apafa")
+      .insert(mockVotes);
+
+    if (insVotesErr) throw insVotesErr;
+
+    // 5. Actualizar ya_voto y detalle en apoderados por cada familia seleccionada
+    for (const item of updatesPorFamilia) {
+      await supabaseAdmin
+        .from("apoderados")
+        .update({
+          ya_voto: true,
+          voto_emitido_por: item.detalle
+        })
+        .eq("familia_id", item.familia_id);
+    }
+
+    return { 
+      success: true, 
+      votosGenerados: mockVotes.length,
+      familiasRestantes: familiasPendientes.length - mockVotes.length
+    };
+  } catch (err: any) {
+    return { error: err.message };
+  }
+}
+
 export async function deleteApafaElectionAction(electionId?: string) {
   try {
     await ensureSuperAdmin();
@@ -798,6 +900,27 @@ export async function getProgresoApafaDataAction() {
     let familiasVotaron = 0;
     for (const f of familiasMap.values()) {
       if (f.ya_voto) familiasVotaron++;
+    }
+
+    // Si existen votos emitidos en votos_apafa pero el padrón aún no se marcó (ej. simulaciones previas)
+    if (familiasVotaron === 0 && votes && votes.length > 0 && apoderados && apoderados.length > 0) {
+      const allFamilyIds = Array.from(familiasMap.keys());
+      const countToMark = Math.min(votes.length, totalFamilias);
+      const familiesToMark = allFamilyIds.slice(0, countToMark);
+
+      if (familiesToMark.length > 0) {
+        for (let i = 0; i < familiesToMark.length; i += 100) {
+          const chunk = familiesToMark.slice(i, i + 100);
+          await supabaseAdmin
+            .from("apoderados")
+            .update({
+              ya_voto: true,
+              voto_emitido_por: "Votó (Simulacro registrado)"
+            })
+            .in("familia_id", chunk);
+        }
+        familiasVotaron = familiesToMark.length;
+      }
     }
 
     return {
