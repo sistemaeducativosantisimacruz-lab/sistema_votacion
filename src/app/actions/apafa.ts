@@ -396,6 +396,103 @@ export async function saveApafaElectionAction(electionData: {
   }
 }
 
+export async function saveSingleApafaPartyAction(params: {
+  electionId?: string;
+  electionTitle: string;
+  fechaVotacion?: string;
+  isSimulacro: boolean;
+  party: {
+    id?: string;
+    nombre?: string;
+    numero_lista?: string;
+    logo_url?: string;
+    color?: string;
+    candidatos?: any[];
+  };
+}) {
+  try {
+    await ensureSuperAdmin();
+
+    let electionId = params.electionId;
+
+    if (!electionId) {
+      // Buscar o crear la elección del workspace
+      let q = supabaseAdmin
+        .from("elecciones_apafa")
+        .select("id");
+
+      if (params.isSimulacro) {
+        q = q.ilike("titulo", "[PRUEBA]%");
+      } else {
+        q = q.not("titulo", "ilike", "[PRUEBA]%");
+      }
+
+      const { data: existingElec } = await q
+        .order("creado_en", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingElec) {
+        electionId = existingElec.id;
+      } else {
+        const finalTitle = params.isSimulacro && !params.electionTitle.startsWith("[PRUEBA]")
+          ? `[PRUEBA] ${params.electionTitle}`
+          : params.electionTitle;
+
+        const { data: newElec, error: insErr } = await supabaseAdmin
+          .from("elecciones_apafa")
+          .insert({
+            titulo: finalTitle,
+            fecha_votacion: params.fechaVotacion || null,
+            esta_activa: false
+          })
+          .select()
+          .single();
+
+        if (insErr) throw insErr;
+        electionId = newElec.id;
+      }
+    }
+
+    const party = params.party;
+    const finalName = party.nombre?.trim() || (party.numero_lista ? `Lista ${party.numero_lista}` : "Nueva Lista");
+
+    const partyPayload: any = {
+      eleccion_id: electionId,
+      nombre: finalName,
+      numero_lista: party.numero_lista || null,
+      logo_url: party.logo_url || null,
+      color: party.color || "#d97706",
+      candidatos: party.candidatos || []
+    };
+
+    let savedParty: any = null;
+
+    if (party.id && !party.id.startsWith("temp-")) {
+      const { data, error } = await supabaseAdmin
+        .from("partidos_apafa")
+        .update(partyPayload)
+        .eq("id", party.id)
+        .select()
+        .single();
+      if (error) throw error;
+      savedParty = data;
+    } else {
+      const { data, error } = await supabaseAdmin
+        .from("partidos_apafa")
+        .insert(partyPayload)
+        .select()
+        .single();
+      if (error) throw error;
+      savedParty = data;
+    }
+
+    return { success: true, party: savedParty, electionId };
+  } catch (err: any) {
+    return { error: err.message || "Error al guardar la lista." };
+  }
+}
+
 export async function deleteApafaPartyAction(partyId: string) {
   try {
     await ensureSuperAdmin();

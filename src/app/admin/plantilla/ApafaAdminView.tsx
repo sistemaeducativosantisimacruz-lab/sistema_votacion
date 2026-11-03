@@ -20,7 +20,8 @@ import {
   getPadronApafaAction,
   getProgresoApafaDataAction,
   getCargosApafaAction,
-  searchApoderadosAction
+  searchApoderadosAction,
+  saveSingleApafaPartyAction
 } from "@/app/actions/apafa";
 import { parseApafaWorkbook, parseApafaWorkbooks } from "@/lib/apafaExcelParser";
 
@@ -57,6 +58,8 @@ export default function ApafaAdminView({
   const [searchResultsMap, setSearchResultsMap] = useState<{ [key: string]: any[] }>({});
   const [isSearchingMap, setIsSearchingMap] = useState<{ [key: string]: boolean }>({});
   const [activeSearchKey, setActiveSearchKey] = useState<string | null>(null);
+  const [savingPartyIdx, setSavingPartyIdx] = useState<number | null>(null);
+  const [savedPartyIdx, setSavedPartyIdx] = useState<number | null>(null);
 
   // Padron State
   const [padronData, setPadronData] = useState<any[]>([]);
@@ -364,6 +367,61 @@ export default function ApafaAdminView({
     }
 
     setParties(prev => prev.filter(p => p.id !== partyId));
+  };
+
+  const handleSavePartyDirect = async (pIdx: number) => {
+    const party = parties[pIdx];
+    if (!party) return;
+
+    setSavingPartyIdx(pIdx);
+    setMessage(null);
+
+    try {
+      const res = await saveSingleApafaPartyAction({
+        electionId: electionId || undefined,
+        electionTitle: titulo || (workspace === "simulacro" ? "[PRUEBA] Elecciones APAFA 2026" : "Elecciones APAFA 2026"),
+        fechaVotacion: fechaVotacion || undefined,
+        isSimulacro: workspace === "simulacro",
+        party: {
+          id: party.id,
+          nombre: party.nombre?.trim() || `Lista ${party.numero_lista || pIdx + 1}`,
+          numero_lista: String(party.numero_lista || pIdx + 1),
+          logo_url: party.logo_url || "",
+          candidatos: party.candidatos || []
+        }
+      });
+
+      if (res.error) throw new Error(res.error);
+
+      if (res.electionId && !electionId) {
+        setElectionId(res.electionId);
+      }
+
+      if (res.party) {
+        const updated = [...parties];
+        updated[pIdx] = {
+          ...updated[pIdx],
+          id: res.party.id,
+          nombre: res.party.nombre,
+          numero_lista: res.party.numero_lista,
+          logo_url: res.party.logo_url || "",
+          candidatos: res.party.candidatos || updated[pIdx].candidatos
+        };
+        setParties(updated);
+      }
+
+      setSavedPartyIdx(pIdx);
+      setTimeout(() => setSavedPartyIdx(null), 2500);
+
+      setMessage({
+        type: "success",
+        text: `¡${party.nombre?.trim() || `Lista ${party.numero_lista || pIdx + 1}`} guardada con éxito en la base de datos!`
+      });
+    } catch (err: any) {
+      setMessage({ type: "error", text: `Error al guardar la lista: ${err.message}` });
+    } finally {
+      setSavingPartyIdx(null);
+    }
   };
 
   const handleUpdateParty = (index: number, field: string, value: any) => {
@@ -953,14 +1011,34 @@ export default function ApafaAdminView({
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveParty(party.id)}
-                        className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-xl transition-colors shrink-0"
-                        title="Eliminar lista"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleSavePartyDirect(pIdx)}
+                          disabled={savingPartyIdx === pIdx}
+                          className={`p-2 rounded-xl transition-all flex items-center justify-center cursor-pointer ${
+                            savedPartyIdx === pIdx
+                              ? "bg-green-500/15 text-green-600 border border-green-500/30 scale-105"
+                              : "text-muted-foreground hover:text-green-600 hover:bg-green-500/10 border border-border/70 hover:border-green-500/30"
+                          }`}
+                          title="Guardar esta lista con los datos actuales"
+                        >
+                          {savingPartyIdx === pIdx ? (
+                            <Loader2 className="w-5 h-5 animate-spin text-amber-600" />
+                          ) : (
+                            <CheckCircle2 className="w-5 h-5" />
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveParty(party.id)}
+                          className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 border border-border/70 hover:border-destructive/30 rounded-xl transition-colors shrink-0 cursor-pointer"
+                          title="Eliminar lista"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
 
                     {/* Candidatos Directivos de APAFA (Roles Reglamentarios: Presidente, Tesorero, Vocal) */}
