@@ -2,16 +2,21 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { LogIn, ShieldAlert, Loader2, CalendarClock, ArrowLeft } from "lucide-react";
+import { LogIn, ShieldAlert, Loader2, CalendarClock, ArrowLeft, Users, GraduationCap } from "lucide-react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { loginVoterAction } from "@/app/actions/auth";
+import { loginApafaVoterAction } from "@/app/actions/apafa";
 
 export default function StudentLogin() {
   const [dni, setDni] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
+  
+  // Modo Escolar vs APAFA
+  const [votingMode, setVotingMode] = useState<"escolar" | "apafa">("escolar");
+
   const [activeYear, setActiveYear] = useState("");
   const [activeName, setActiveName] = useState("");
   const [isSimulacroMode, setIsSimulacroMode] = useState(false);
@@ -19,47 +24,60 @@ export default function StudentLogin() {
   const [simulacroElection, setSimulacroElection] = useState<any>(null);
   const [showInactiveMessage, setShowInactiveMessage] = useState(false);
 
+  // Cargar elecciones según el modo activo (Escolar vs APAFA)
   useEffect(() => {
     const fetchElections = async () => {
-      // Official
-      const { data: official } = await supabase
-        .from("elecciones")
-        .select("*")
-        .not("titulo", "ilike", "[PRUEBA]%")
-        .order("creado_en", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      setError("");
+      setOfficialElection(null);
+      setSimulacroElection(null);
 
-      if (official) {
-        setOfficialElection(official);
-        const match = official.titulo.match(/(.*)\s+(\d{4})$/);
-        if (match) {
-          setActiveName(match[1].trim());
-          setActiveYear(match[2]);
+      const tableName = votingMode === "apafa" ? "elecciones_apafa" : "elecciones";
+
+      try {
+        // Elección Oficial
+        const { data: official, error: offErr } = await supabase
+          .from(tableName)
+          .select("*")
+          .not("titulo", "ilike", "[PRUEBA]%")
+          .order("creado_en", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (official) {
+          setOfficialElection(official);
+          const match = official.titulo.match(/(.*)\s+(\d{4})$/);
+          if (match) {
+            setActiveName(match[1].trim());
+            setActiveYear(match[2]);
+          } else {
+            setActiveName(official.titulo);
+            setActiveYear(new Date().getFullYear().toString());
+          }
         } else {
-          setActiveName(official.titulo);
+          setActiveName(votingMode === "apafa" ? "APAFA" : "");
           setActiveYear(new Date().getFullYear().toString());
         }
-      } else {
-        setActiveYear(new Date().getFullYear().toString());
-      }
 
-      // Simulacro
-      const { data: simulacro } = await supabase
-        .from("elecciones")
-        .select("*")
-        .ilike("titulo", "[PRUEBA]%")
-        .eq("esta_activa", true)
-        .order("creado_en", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      
-      if (simulacro) {
-        setSimulacroElection(simulacro);
+        // Elección Simulacro
+        const { data: simulacro } = await supabase
+          .from(tableName)
+          .select("*")
+          .ilike("titulo", "[PRUEBA]%")
+          .eq("esta_activa", true)
+          .order("creado_en", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (simulacro) {
+          setSimulacroElection(simulacro);
+        }
+      } catch (err: any) {
+        console.error("Error fetching elections:", err);
       }
     };
+
     fetchElections();
-  }, []);
+  }, [votingMode]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,7 +102,12 @@ export default function StudentLogin() {
     }
 
     try {
-      const result = await loginVoterAction(dni);
+      let result;
+      if (votingMode === "apafa") {
+        result = await loginApafaVoterAction(dni);
+      } else {
+        result = await loginVoterAction(dni);
+      }
       
       if (result?.error) {
         throw new Error(result.error);
@@ -98,13 +121,20 @@ export default function StudentLogin() {
     }
   };
 
+  const toggleVotingMode = () => {
+    setVotingMode(prev => prev === "escolar" ? "apafa" : "escolar");
+    setError("");
+    setShowInactiveMessage(false);
+    setDni("");
+  };
+
   return (
     <main className="min-h-screen flex items-center justify-center bg-background relative overflow-hidden">
       
       {/* Diseño de franjas verticales */}
       <div className="absolute top-0 left-0 h-full flex pointer-events-none z-0">
-        {/* Franja azul predominante */}
-        <div className="h-full w-16 sm:w-24 md:w-32 lg:w-48 xl:w-64 bg-[#13439c] shadow-2xl"></div>
+        {/* Franja azul o ámbar predominante */}
+        <div className={`h-full w-16 sm:w-24 md:w-32 lg:w-48 xl:w-64 transition-colors duration-500 shadow-2xl ${votingMode === 'apafa' ? 'bg-[#9a3412]' : 'bg-[#13439c]'}`}></div>
         {/* Tres líneas amarillas delgadas */}
         <div className="flex h-full ml-3 gap-2">
           <div className="h-full w-1.5 lg:w-2 bg-[#dfb629] shadow-[0_0_15px_rgba(223,182,41,0.6)]"></div>
@@ -129,7 +159,7 @@ export default function StudentLogin() {
           </div>
 
           {/* Tarjeta de Login / Mensaje Inactivo */}
-          <div className="bg-card w-full max-w-[420px] p-8 lg:p-10 rounded-[2rem] shadow-2xl flex flex-col items-center border border-border/50 md:-ml-8 md:-translate-x-4 lg:-translate-x-8 relative flex-shrink-0 min-h-[500px] justify-center">
+          <div className="bg-card w-full max-w-[440px] p-8 lg:p-10 rounded-[2rem] shadow-2xl flex flex-col items-center border border-border/50 md:-ml-8 md:-translate-x-4 lg:-translate-x-8 relative flex-shrink-0 min-h-[520px] justify-center">
             
             {showInactiveMessage ? (
               <div className="flex flex-col items-center animate-in fade-in zoom-in-95 duration-500 w-full">
@@ -137,7 +167,7 @@ export default function StudentLogin() {
                   <img src="/insignia.png" alt="Insignia Escolar" className="w-full h-full object-contain" />
                 </div>
                 
-                <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mb-4 text-blue-600">
+                <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${votingMode === 'apafa' ? 'bg-amber-500/10 text-amber-600' : 'bg-blue-500/10 text-blue-600'}`}>
                   <CalendarClock className="w-8 h-8" />
                 </div>
                 
@@ -146,7 +176,7 @@ export default function StudentLogin() {
                 </h2>
                 
                 <p className="text-center text-muted-foreground mb-8">
-                  Las elecciones escolares {isSimulacroMode ? 'de simulacro ' : ''}están programadas para la fecha:<br/>
+                  Las elecciones {votingMode === 'apafa' ? 'de APAFA (Padres de Familia)' : 'escolares'} {isSimulacroMode ? 'de simulacro ' : ''}están programadas para la fecha:<br/>
                   <strong className="text-lg text-foreground block mt-2">
                     {officialElection?.fecha_votacion 
                       ? officialElection.fecha_votacion.split("-").reverse().join("/") 
@@ -163,15 +193,30 @@ export default function StudentLogin() {
               </div>
             ) : (
               <div className="w-full flex flex-col items-center animate-in fade-in">
-                <div className="w-24 h-24 lg:w-28 lg:h-28 mb-5 relative">
+                <div className="w-24 h-24 lg:w-28 lg:h-28 mb-4 relative">
                   <img src="/insignia.png" alt="Insignia Escolar" className="w-full h-full object-contain" />
+                </div>
+
+                {/* Badge indicador de modalidad */}
+                <div className="mb-3">
+                  {votingMode === "apafa" ? (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                      <Users className="w-3.5 h-3.5" /> Elecciones APAFA (Padres de Familia)
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-500/15 text-blue-700 dark:text-blue-400 border border-blue-500/30">
+                      <GraduationCap className="w-3.5 h-3.5" /> Elecciones Escolares Estudiantiles
+                    </span>
+                  )}
                 </div>
                 
                 <h1 className="text-2xl lg:text-3xl font-bold text-foreground mb-2 text-center">
                   Portal de Votación {isSimulacroMode && <span className="text-amber-500 block text-lg mt-1">(Simulacro)</span>}
                 </h1>
-                <p className="text-muted-foreground text-center mb-8 text-sm lg:text-base px-2">
-                  Ingresa tu DNI para participar en las elecciones escolares
+                <p className="text-muted-foreground text-center mb-6 text-sm lg:text-base px-2">
+                  {votingMode === "apafa" 
+                    ? "Ingresa tu DNI de padre o madre para emitir el voto familiar" 
+                    : "Ingresa tu DNI para participar en las elecciones escolares"}
                 </p>
 
                 <form onSubmit={handleLogin} className="w-full space-y-6">
@@ -186,6 +231,7 @@ export default function StudentLogin() {
                       value={dni}
                       onChange={(e) => setDni(e.target.value.replace(/\D/g, '').slice(0, 8))}
                       required
+                      placeholder="8 dígitos"
                       disabled={loading}
                     />
                   </div>
@@ -199,7 +245,13 @@ export default function StudentLogin() {
                   <button
                     type="submit"
                     disabled={loading || dni.length !== 8}
-                    className={`w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:hover:scale-100 text-white py-4 text-lg rounded-2xl font-bold transition-all hover:scale-[1.02] active:scale-[0.98] ${isSimulacroMode ? 'bg-amber-500 hover:bg-amber-600' : 'bg-primary hover:bg-primary/90'}`}
+                    className={`w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:hover:scale-100 text-white py-4 text-lg rounded-2xl font-bold transition-all hover:scale-[1.02] active:scale-[0.98] ${
+                      isSimulacroMode 
+                        ? 'bg-amber-500 hover:bg-amber-600' 
+                        : votingMode === 'apafa' 
+                          ? 'bg-amber-700 hover:bg-amber-800' 
+                          : 'bg-primary hover:bg-primary/90'
+                    }`}
                   >
                     {loading ? (
                       <>Verificando <Loader2 className="w-6 h-6 animate-spin" /></>
@@ -209,17 +261,37 @@ export default function StudentLogin() {
                   </button>
                 </form>
 
-                <div className="mt-8 pt-6 border-t border-border w-full flex flex-col items-center gap-4">
+                <div className="mt-6 pt-5 border-t border-border w-full flex flex-col items-center gap-3">
+                  
+                  {/* Botón para cambiar entre Votación Escolar y Votación APAFA */}
+                  <button
+                    type="button"
+                    onClick={toggleVotingMode}
+                    className="w-full py-2.5 px-4 rounded-xl border border-border/80 bg-secondary/50 hover:bg-secondary font-semibold text-sm transition-all flex items-center justify-center gap-2 shadow-sm text-foreground"
+                  >
+                    {votingMode === "escolar" ? (
+                      <>
+                        <Users className="w-4 h-4 text-amber-600" />
+                        Cambiar a votación de APAFA
+                      </>
+                    ) : (
+                      <>
+                        <GraduationCap className="w-4 h-4 text-blue-600" />
+                        Cambiar a votación Escolar
+                      </>
+                    )}
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setIsSimulacroMode(!isSimulacroMode)}
-                    className="text-sm font-medium text-muted-foreground hover:text-foreground underline underline-offset-4 transition-colors"
+                    className="text-xs font-medium text-muted-foreground hover:text-foreground underline underline-offset-4 transition-colors"
                   >
                     {isSimulacroMode ? "Ir a la elección oficial" : "Ir a simulacro"}
                   </button>
                   <Link 
                     href="/admin"
-                    className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors"
+                    className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors mt-1"
                   >
                     <ShieldAlert className="w-4 h-4" />
                     Acceso Administrativo
@@ -234,11 +306,11 @@ export default function StudentLogin() {
         {activeYear && (
           <div className="hidden lg:flex flex-col items-center justify-center font-black select-none pointer-events-none z-0 flex-shrink min-w-[250px]">
             {activeName && (
-               <div className="text-[clamp(1.5rem,2.5vw,3rem)] text-[#13439c]/50 tracking-widest uppercase mb-4 text-center text-balance leading-tight">
+               <div className={`text-[clamp(1.5rem,2.5vw,3rem)] tracking-widest uppercase mb-4 text-center text-balance leading-tight ${votingMode === 'apafa' ? 'text-amber-800/50' : 'text-[#13439c]/50'}`}>
                  {activeName}
                </div>
             )}
-            <div className="flex flex-col items-center text-[clamp(6rem,12vw,14rem)] leading-[0.75] tracking-tighter text-[#13439c]/25 tabular-nums">
+            <div className={`flex flex-col items-center text-[clamp(6rem,12vw,14rem)] leading-[0.75] tracking-tighter tabular-nums ${votingMode === 'apafa' ? 'text-amber-800/25' : 'text-[#13439c]/25'}`}>
               <span>{activeYear.slice(0, 2)}</span>
               <span>{activeYear.slice(2, 4)}</span>
             </div>

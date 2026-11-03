@@ -2,20 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, AlertCircle, LogOut, Loader2, Beaker } from "lucide-react";
+import { CheckCircle2, AlertCircle, LogOut, Loader2, Beaker, Users, GraduationCap } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { getVoterSessionAction, logoutVoterAction } from "@/app/actions/auth";
 import { submitVoteAction } from "@/app/actions/vote";
-
-type UserSession = {
-  id: string;
-  dni: string;
-  nombres: string;
-  apellidos: string;
-  grado: string;
-  seccion: string;
-  nivel: string;
-};
+import { submitVoteApafaAction } from "@/app/actions/apafa";
+import { UserSession } from "@/lib/auth";
 
 type Election = {
   id: string;
@@ -28,6 +20,7 @@ type Party = {
   logo_url: string;
   nivel?: string;
   numero_lista?: string | number;
+  candidatos?: any[];
 };
 
 export default function VotacionPage() {
@@ -45,22 +38,23 @@ export default function VotacionPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // 1. Validar sesión desde el servidor
-    const checkSession = async () => {
+    const init = async () => {
+      // 1. Validar sesión desde el servidor
       const session = await getVoterSessionAction();
       if (!session) {
         router.push("/");
         return;
       }
       setUser(session);
-    };
-    checkSession();
 
-    // 2. Cargar elección activa y partidos
-    const fetchElectionData = async () => {
+      const isApafa = session.tipo === "apoderado";
+      const electionTable = isApafa ? "elecciones_apafa" : "elecciones";
+      const partyTable = isApafa ? "partidos_apafa" : "partidos";
+
+      // 2. Cargar elección activa y partidos
       try {
         const { data: electionData, error: electionErr } = await supabase
-          .from("elecciones")
+          .from(electionTable)
           .select("id, titulo")
           .eq("esta_activa", true)
           .order("creado_en", { ascending: false })
@@ -68,19 +62,22 @@ export default function VotacionPage() {
           .maybeSingle();
 
         if (electionErr || !electionData) {
-          throw new Error("No hay elecciones activas en este momento.");
+          throw new Error(
+            isApafa 
+              ? "No hay elecciones de APAFA activas en este momento." 
+              : "No hay elecciones escolares activas en este momento."
+          );
         }
         setElection(electionData);
 
         const { data: partiesData, error: partiesErr } = await supabase
-          .from("partidos")
-          .select("id, nombre, logo_url, nivel, numero_lista")
+          .from(partyTable)
+          .select("id, nombre, logo_url, nivel, numero_lista, candidatos")
           .eq("eleccion_id", electionData.id);
 
         if (partiesErr) throw partiesErr;
         
-        let filteredParties = partiesData || [];
-        setParties(filteredParties);
+        setParties(partiesData || []);
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -88,7 +85,7 @@ export default function VotacionPage() {
       }
     };
 
-    fetchElectionData();
+    init();
   }, [router]);
 
   const handleLogout = async () => {
@@ -102,7 +99,14 @@ export default function VotacionPage() {
     setError("");
 
     try {
-      const result = await submitVoteAction(election.id, selectedParty === "blanco" ? null : selectedParty);
+      const partyToVote = selectedParty === "blanco" ? null : selectedParty;
+      let result;
+
+      if (user.tipo === "apoderado") {
+        result = await submitVoteApafaAction(election.id, partyToVote);
+      } else {
+        result = await submitVoteAction(election.id, partyToVote);
+      }
       
       if (result?.error) {
         throw new Error(result.error);
@@ -160,6 +164,8 @@ export default function VotacionPage() {
     );
   }
 
+  const isApafa = user?.tipo === "apoderado";
+
   return (
     <main className="min-h-screen bg-background pb-24">
       {/* Header */}
@@ -168,15 +174,22 @@ export default function VotacionPage() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-xl font-bold text-foreground">
-                {election?.titulo.replace("[PRUEBA]", "").trim() || "Elecciones Escolares"}
+                {election?.titulo.replace("[PRUEBA]", "").trim() || (isApafa ? "Elecciones APAFA" : "Elecciones Escolares")}
               </h1>
               {election?.titulo.startsWith("[PRUEBA]") && (
                 <span className="bg-amber-500 text-amber-950 text-xs font-bold px-2 py-1 rounded-md flex items-center gap-1 shadow-sm">
                   <Beaker className="w-3 h-3" /> SIMULACRO
                 </span>
               )}
+              {isApafa && (
+                <span className="bg-amber-600/15 text-amber-800 dark:text-amber-300 text-xs font-bold px-2.5 py-1 rounded-md flex items-center gap-1 border border-amber-600/30">
+                  <Users className="w-3.5 h-3.5" /> APAFA
+                </span>
+              )}
             </div>
-            <p className="text-sm text-muted-foreground">Sistema de Votación Institucional</p>
+            <p className="text-sm text-muted-foreground">
+              {isApafa ? "Asociación de Padres de Familia" : "Sistema de Votación Institucional"}
+            </p>
           </div>
           <button 
             onClick={handleLogout}
@@ -196,11 +209,13 @@ export default function VotacionPage() {
           </div>
         )}
 
-        {/* Student Info Card */}
+        {/* Elector Info Card */}
         {user && (
           <section className="bg-card text-card-foreground p-6 rounded-2xl shadow-sm border border-border mb-8 flex flex-wrap gap-6 items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground mb-1">Elector</p>
+              <p className="text-sm text-muted-foreground mb-1">
+                {isApafa ? `Padre / Madre de Familia (${user.parentesco || 'Apoderado'})` : "Estudiante Elector"}
+              </p>
               <h2 className="text-2xl font-bold">{user.nombres} {user.apellidos}</h2>
             </div>
             <div className="flex gap-6 flex-wrap">
@@ -209,8 +224,12 @@ export default function VotacionPage() {
                 <p className="font-semibold">{user.dni}</p>
               </div>
               <div className="bg-secondary/50 px-4 py-2 rounded-xl">
-                <p className="text-xs text-muted-foreground uppercase tracking-wider">Grado y Sección</p>
-                <p className="font-semibold">{user.grado} "{user.seccion}" {user.nivel ? `- ${user.nivel}` : ''}</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wider">
+                  {isApafa ? "Hijo(s) Representado(s)" : "Grado y Sección"}
+                </p>
+                <p className="font-semibold">
+                  {user.grado} {user.seccion ? `"${user.seccion}"` : ""} {user.nivel ? `- ${user.nivel}` : ""}
+                </p>
               </div>
             </div>
           </section>
@@ -219,7 +238,7 @@ export default function VotacionPage() {
         {/* Voting Options */}
         <section>
           <div className="mb-6">
-            <h3 className="text-xl font-bold mb-2">Selecciona tu candidato</h3>
+            <h3 className="text-xl font-bold mb-2">Selecciona tu lista o candidatura</h3>
             <p className="text-muted-foreground">Marca la opción de tu preferencia haciendo clic en la tarjeta.</p>
           </div>
           
@@ -247,7 +266,9 @@ export default function VotacionPage() {
                   </div>
 
                   {party.numero_lista && (
-                    <h3 className="text-sm font-bold text-muted-foreground tracking-widest uppercase mb-2">Lista {party.numero_lista}</h3>
+                    <h3 className="text-sm font-bold text-muted-foreground tracking-widest uppercase mb-2">
+                      Lista {party.numero_lista}
+                    </h3>
                   )}
 
                   <div className="w-32 h-32 rounded-2xl overflow-hidden mb-6 ring-4 ring-background shadow-md group-hover:scale-105 transition-transform bg-white flex items-center justify-center">
@@ -257,7 +278,21 @@ export default function VotacionPage() {
                       <span className="text-muted-foreground text-4xl font-bold">{party.nombre.charAt(0)}</span>
                     )}
                   </div>
-                  <h4 className="text-lg font-bold text-foreground leading-tight">{party.nombre}</h4>
+                  <h4 className="text-lg font-bold text-foreground leading-tight mb-2">{party.nombre}</h4>
+
+                  {/* Si es APAFA y tiene candidatos directivos */}
+                  {Array.isArray(party.candidatos) && party.candidatos.length > 0 && (
+                    <div className="w-full mt-3 pt-3 border-t border-border/50 text-left text-xs text-muted-foreground space-y-1">
+                      {party.candidatos.slice(0, 3).map((c: any, idx: number) => (
+                        <div key={idx} className="truncate">
+                          <span className="font-semibold text-foreground">{c.cargo || 'Directivo'}:</span> {c.nombre}
+                        </div>
+                      ))}
+                      {party.candidatos.length > 3 && (
+                        <p className="text-[10px] text-primary italic">+{party.candidatos.length - 3} integrantes más</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

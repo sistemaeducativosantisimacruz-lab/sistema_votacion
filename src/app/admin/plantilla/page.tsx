@@ -13,6 +13,7 @@ import { getAdminsAction, createManualAdminAction, editManualAdminAction, demote
 import { deleteElectionAction, updateElectionStatusAction, deletePartyAction, updateStudentsVoteStatusAction, deleteVotesByElectionAction, insertMockVotesAction, insertElectionAction, upsertPartyAction, updateElectionDataAction, updatePartyCandidatesAction, getCargosAction } from "@/app/actions/plantilla";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import ApafaAdminView from "./ApafaAdminView";
 
 type Party = {
   id?: string;
@@ -28,6 +29,21 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<"plantilla" | "padron" | "accesos" | "progreso" | "historial">("plantilla");
   const [loading, setLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<{ type: 'success' | 'error' | null, message: string }>({ type: null, message: '' });
+  
+  // Ámbito de Votación: Escolar vs APAFA
+  const [systemScope, setSystemScope] = useState<"escolar" | "apafa">("escolar");
+
+  useEffect(() => {
+    const savedScope = sessionStorage.getItem("admin_system_scope");
+    if (savedScope === "escolar" || savedScope === "apafa") {
+      setSystemScope(savedScope);
+    }
+  }, []);
+
+  const handleSystemScopeChange = (scope: "escolar" | "apafa") => {
+    setSystemScope(scope);
+    sessionStorage.setItem("admin_system_scope", scope);
+  };
   
   // Plantilla State
   const [isMounted, setIsMounted] = useState(false);
@@ -1936,10 +1952,24 @@ export default function AdminDashboard() {
     <div className="h-[100dvh] overflow-hidden bg-background flex">
       {/* Sidebar */}
       <aside className="w-64 bg-card border-r border-border hidden md:flex flex-col">
-        <div className="p-6 border-b border-border">
+        <div className="p-4 border-b border-border space-y-3">
           <h2 className="text-xl font-bold flex items-center gap-2">
             <Settings className="w-6 h-6 text-primary" /> Admin Panel
           </h2>
+          <div className="flex bg-secondary/80 p-1 rounded-xl border border-border">
+            <button
+              onClick={() => handleSystemScopeChange("escolar")}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${systemScope === "escolar" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              🎓 Escolar
+            </button>
+            <button
+              onClick={() => handleSystemScopeChange("apafa")}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${systemScope === "apafa" ? "bg-amber-600 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              👨‍👩‍👧‍👦 APAFA
+            </button>
+          </div>
         </div>
         <nav className="flex-1 p-4 space-y-2">
           {!isComite && (
@@ -1992,17 +2022,51 @@ export default function AdminDashboard() {
 
       {/* Main Content */}
       <main className="flex-1 p-4 md:p-8 pb-24 md:pb-8 overflow-y-auto flex flex-col">
-        {currentUser && (
-          <div className="w-full justify-end mb-4 hidden sm:flex">
-            <div className="bg-card border border-border px-4 py-2 rounded-xl shadow-sm flex items-center gap-2 animate-in fade-in">
-              <span className="text-sm font-semibold">{currentUser.nombres} {currentUser.apellidos}</span>
+        {/* Selector de Modo: Escolar vs APAFA */}
+        <div className="w-full mb-6 p-3 bg-card border border-border rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Proceso Activo:
+            </span>
+            <div className="inline-flex p-1 bg-secondary/80 rounded-xl border border-border/80">
+              <button
+                onClick={() => handleSystemScopeChange("escolar")}
+                className={`px-4 py-2 rounded-lg text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${
+                  systemScope === "escolar"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                🎓 Votación Escolar
+              </button>
+              <button
+                onClick={() => handleSystemScopeChange("apafa")}
+                className={`px-4 py-2 rounded-lg text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${
+                  systemScope === "apafa"
+                    ? "bg-amber-600 text-white shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                👨‍👩‍👧‍👦 Votación APAFA
+              </button>
+            </div>
+          </div>
+
+          {currentUser && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="font-semibold">{currentUser.nombres} {currentUser.apellidos}</span>
               <span className="text-muted-foreground">|</span>
-              <span className="text-xs font-bold uppercase tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-md">
+              <span className="font-bold uppercase tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-md">
                 {currentUser.cargo || currentUser.rol}
               </span>
             </div>
-          </div>
-        )}
+          )}
+        </div>
+
+        {systemScope === "apafa" ? (
+          <ApafaAdminView isSuperAdmin={isSuperAdmin} currentUser={currentUser} />
+        ) : (
+          <>
         
         {activeTab === 'plantilla' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full">
@@ -3184,6 +3248,9 @@ export default function AdminDashboard() {
               </div>
             </div>
           </div>
+        )}
+
+          </>
         )}
 
       </main>

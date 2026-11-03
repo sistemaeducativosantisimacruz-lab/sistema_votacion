@@ -17,6 +17,9 @@ export type UserSession = {
   nivel: string;
   rol?: string; // admin roles
   cargo?: string;
+  tipo?: "estudiante" | "apoderado";
+  familia_id?: string;
+  parentesco?: string;
 };
 
 export async function signToken(payload: any, expiresIn: string = "24h") {
