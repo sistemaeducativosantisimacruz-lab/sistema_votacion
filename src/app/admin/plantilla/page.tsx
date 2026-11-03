@@ -14,6 +14,7 @@ import { deleteElectionAction, updateElectionStatusAction, deletePartyAction, up
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import ApafaAdminView from "./ApafaAdminView";
+import { getSystemVotingModeAction, setSystemVotingModeAction } from "@/app/actions/apafa";
 
 type Party = {
   id?: string;
@@ -32,17 +33,36 @@ export default function AdminDashboard() {
   
   // Ámbito de Votación: Escolar vs APAFA
   const [systemScope, setSystemScope] = useState<"escolar" | "apafa">("escolar");
+  const [scopeMessage, setScopeMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    const savedScope = sessionStorage.getItem("admin_system_scope");
-    if (savedScope === "escolar" || savedScope === "apafa") {
-      setSystemScope(savedScope);
-    }
+    const initScope = async () => {
+      const savedScope = sessionStorage.getItem("admin_system_scope");
+      if (savedScope === "escolar" || savedScope === "apafa") {
+        setSystemScope(savedScope);
+      } else {
+        const res = await getSystemVotingModeAction();
+        if (res?.modo) {
+          setSystemScope(res.modo);
+          sessionStorage.setItem("admin_system_scope", res.modo);
+        }
+      }
+    };
+    initScope();
   }, []);
 
-  const handleSystemScopeChange = (scope: "escolar" | "apafa") => {
+  const handleSystemScopeChange = async (scope: "escolar" | "apafa") => {
     setSystemScope(scope);
     sessionStorage.setItem("admin_system_scope", scope);
+    try {
+      if (isSuperAdmin) {
+        await setSystemVotingModeAction(scope);
+        setScopeMessage(`Modo cambiado a ${scope === "apafa" ? "Votación APAFA" : "Votación Escolar"} en todo el sistema.`);
+        setTimeout(() => setScopeMessage(null), 4000);
+      }
+    } catch (e: any) {
+      console.error("Error setting system voting mode:", e);
+    }
   };
   
   // Plantilla State
@@ -2023,11 +2043,14 @@ export default function AdminDashboard() {
       {/* Main Content */}
       <main className="flex-1 p-4 md:p-8 pb-24 md:pb-8 overflow-y-auto flex flex-col">
         {/* Selector de Modo: Escolar vs APAFA */}
-        <div className="w-full mb-6 p-3 bg-card border border-border rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              Proceso Activo:
-            </span>
+        <div className="w-full mb-6 p-4 bg-card border border-border rounded-2xl shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full md:w-auto">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Modo de Votación del Sistema:
+              </span>
+            </div>
             <div className="inline-flex p-1 bg-secondary/80 rounded-xl border border-border/80">
               <button
                 onClick={() => handleSystemScopeChange("escolar")}
@@ -2052,16 +2075,29 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {currentUser && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="font-semibold">{currentUser.nombres} {currentUser.apellidos}</span>
-              <span className="text-muted-foreground">|</span>
-              <span className="font-bold uppercase tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-md">
-                {currentUser.cargo || currentUser.rol}
-              </span>
-            </div>
-          )}
+          <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
+            <span className="text-xs text-muted-foreground hidden lg:inline">
+              {systemScope === "escolar" 
+                ? "Portal público configurado para elecciones escolares." 
+                : "Portal público configurado para elecciones de APAFA."}
+            </span>
+            {currentUser && (
+              <div className="flex items-center gap-2 text-xs bg-secondary/50 px-3 py-1.5 rounded-xl border border-border">
+                <span className="font-semibold">{currentUser.nombres} {currentUser.apellidos}</span>
+                <span className="text-muted-foreground">|</span>
+                <span className="font-bold uppercase tracking-wider text-primary">
+                  {currentUser.cargo || currentUser.rol}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
+
+        {scopeMessage && (
+          <div className="mb-4 p-3 bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 rounded-xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+            <CheckCircle2 className="w-4 h-4" /> {scopeMessage}
+          </div>
+        )}
 
         {systemScope === "apafa" ? (
           <ApafaAdminView isSuperAdmin={isSuperAdmin} currentUser={currentUser} />

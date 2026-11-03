@@ -6,7 +6,7 @@ import { LogIn, ShieldAlert, Loader2, CalendarClock, ArrowLeft } from "lucide-re
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { loginVoterAction } from "@/app/actions/auth";
-import { loginApafaVoterAction } from "@/app/actions/apafa";
+import { loginApafaVoterAction, getSystemVotingModeAction } from "@/app/actions/apafa";
 
 export default function StudentLogin() {
   const [dni, setDni] = useState("");
@@ -14,8 +14,22 @@ export default function StudentLogin() {
   const [error, setError] = useState("");
   const router = useRouter();
   
-  // Modo Escolar vs APAFA
+  // Modo Escolar vs APAFA (inicializado según lo que haya habilitado el admin)
   const [votingMode, setVotingMode] = useState<"escolar" | "apafa">("escolar");
+
+  useEffect(() => {
+    const initMode = async () => {
+      try {
+        const res = await getSystemVotingModeAction();
+        if (res?.modo) {
+          setVotingMode(res.modo);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    initMode();
+  }, []);
 
   const [activeYear, setActiveYear] = useState("");
   const [activeName, setActiveName] = useState("");

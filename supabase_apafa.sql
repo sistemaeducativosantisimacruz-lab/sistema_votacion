@@ -116,3 +116,22 @@ CREATE POLICY "Permitir lectura publica votos_apafa" ON public.votos_apafa FOR S
 DROP POLICY IF EXISTS "Permitir full acceso service role votos_apafa" ON public.votos_apafa;
 CREATE POLICY "Permitir full acceso service role votos_apafa" ON public.votos_apafa USING (true) WITH CHECK (true);
 
+-- 6. Tabla de Configuración Global del Sistema (Modo Escolar vs APAFA)
+CREATE TABLE IF NOT EXISTS public.configuracion_sistema (
+    clave TEXT PRIMARY KEY,
+    valor TEXT NOT NULL,
+    actualizado_en TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Configuración inicial por defecto: modo escolar
+INSERT INTO public.configuracion_sistema (clave, valor)
+VALUES ('modo_votacion', 'escolar')
+ON CONFLICT (clave) DO NOTHING;
+
+ALTER TABLE public.configuracion_sistema ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Permitir lectura publica configuracion_sistema" ON public.configuracion_sistema;
+CREATE POLICY "Permitir lectura publica configuracion_sistema" ON public.configuracion_sistema FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Permitir full acceso service role configuracion_sistema" ON public.configuracion_sistema;
+CREATE POLICY "Permitir full acceso service role configuracion_sistema" ON public.configuracion_sistema USING (true) WITH CHECK (true);
+
+

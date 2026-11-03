@@ -633,3 +633,64 @@ export async function getProgresoApafaDataAction() {
   }
 }
 
+// -------------------------------------------------------------
+// 4. CONFIGURACIÓN GLOBAL DEL MODO DE VOTACIÓN DEL SISTEMA
+// -------------------------------------------------------------
+
+export async function getSystemVotingModeAction(): Promise<{ modo: "escolar" | "apafa" }> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("configuracion_sistema")
+      .select("valor")
+      .eq("clave", "modo_votacion")
+      .maybeSingle();
+
+    if (!error && data?.valor) {
+      if (data.valor === "apafa" || data.valor === "escolar") {
+        return { modo: data.valor };
+      }
+    }
+
+    // Fallback si la tabla aún no existe: inferir por elección activa
+    const { data: apafaActive } = await supabaseAdmin
+      .from("elecciones_apafa")
+      .select("id")
+      .eq("esta_activa", true)
+      .limit(1)
+      .maybeSingle();
+
+    if (apafaActive) {
+      return { modo: "apafa" };
+    }
+
+    return { modo: "escolar" };
+  } catch (err: any) {
+    return { modo: "escolar" };
+  }
+}
+
+export async function setSystemVotingModeAction(modo: "escolar" | "apafa") {
+  try {
+    await ensureSuperAdmin();
+
+    const { error } = await supabaseAdmin
+      .from("configuracion_sistema")
+      .upsert({
+        clave: "modo_votacion",
+        valor: modo,
+        actualizado_en: new Date().toISOString()
+      }, { onConflict: "clave" });
+
+    if (error) {
+      if (error.message.includes("does not exist") || error.code === "42P01") {
+        throw new Error("La tabla configuracion_sistema aún no existe en Supabase. Ejecuta el script supabase_apafa.sql.");
+      }
+      throw error;
+    }
+
+    return { success: true, modo };
+  } catch (err: any) {
+    return { error: err.message || "Error al actualizar el modo de votación del sistema." };
+  }
+}
+
