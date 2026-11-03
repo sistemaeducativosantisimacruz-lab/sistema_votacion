@@ -1995,33 +1995,53 @@ export default function AdminDashboard() {
           {!isComite && (
             <button 
               onClick={() => setActiveTab("plantilla")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${activeTab === 'plantilla' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary'}`}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${
+                activeTab === 'plantilla' 
+                  ? (systemScope === 'apafa' ? 'bg-amber-600/15 text-amber-600 font-bold' : 'bg-primary/10 text-primary font-bold') 
+                  : 'text-muted-foreground hover:bg-secondary'
+              }`}
             >
               <Users className="w-5 h-5" /> Plantilla Electoral
             </button>
           )}
           <button 
             onClick={() => setActiveTab("padron")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${activeTab === 'padron' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary'}`}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${
+              activeTab === 'padron' 
+                ? (systemScope === 'apafa' ? 'bg-amber-600/15 text-amber-600 font-bold' : 'bg-primary/10 text-primary font-bold') 
+                : 'text-muted-foreground hover:bg-secondary'
+            }`}
           >
             <FileSpreadsheet className="w-5 h-5" /> Padrón Electoral
           </button>
           <button 
             onClick={() => setActiveTab("progreso")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${activeTab === 'progreso' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary'}`}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${
+              activeTab === 'progreso' 
+                ? (systemScope === 'apafa' ? 'bg-amber-600/15 text-amber-600 font-bold' : 'bg-primary/10 text-primary font-bold') 
+                : 'text-muted-foreground hover:bg-secondary'
+            }`}
           >
             <BarChart2 className="w-5 h-5" /> Progreso de Votación
           </button>
           <button 
             onClick={() => setActiveTab("historial")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${activeTab === 'historial' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary'}`}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${
+              activeTab === 'historial' 
+                ? (systemScope === 'apafa' ? 'bg-amber-600/15 text-amber-600 font-bold' : 'bg-primary/10 text-primary font-bold') 
+                : 'text-muted-foreground hover:bg-secondary'
+            }`}
           >
             <Archive className="w-5 h-5" /> Historial Electoral
           </button>
           {isSuperAdmin && (
             <button 
               onClick={() => setActiveTab("accesos")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${activeTab === 'accesos' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary'}`}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${
+                activeTab === 'accesos' 
+                  ? (systemScope === 'apafa' ? 'bg-amber-600/15 text-amber-600 font-bold' : 'bg-primary/10 text-primary font-bold') 
+                  : 'text-muted-foreground hover:bg-secondary'
+              }`}
             >
               <ShieldCheck className="w-5 h-5" /> Gestión de Accesos
             </button>
@@ -2099,12 +2119,18 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {systemScope === "apafa" ? (
-          <ApafaAdminView isSuperAdmin={isSuperAdmin} currentUser={currentUser} />
-        ) : (
-          <>
-        
-        {activeTab === 'plantilla' && (
+        {/* Vistas de APAFA: Plantilla, Padrón y Progreso */}
+        {systemScope === "apafa" && (activeTab === "plantilla" || activeTab === "padron" || activeTab === "progreso") && (
+          <ApafaAdminView 
+            isSuperAdmin={isSuperAdmin} 
+            currentUser={currentUser} 
+            activeTab={activeTab as "plantilla" | "padron" | "progreso"}
+            setActiveTab={(tab) => setActiveTab(tab)}
+          />
+        )}
+
+        {/* Vistas Escolares: Plantilla, Padrón y Progreso */}
+        {systemScope === "escolar" && activeTab === 'plantilla' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full">
             
             {(systemIsTestMode || isOfficialElectionActive) && (
@@ -2436,7 +2462,7 @@ export default function AdminDashboard() {
         )}
 
         {/* PADRON AND OTHERS TABS... */}
-        {activeTab === 'padron' && (
+        {systemScope === "escolar" && activeTab === 'padron' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             <header className="mb-8 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
               <div>
@@ -2745,7 +2771,7 @@ export default function AdminDashboard() {
         )}
 
         {/* PROGRESO Y ACCESOS (Sin cambios estructurales) */}
-        {activeTab === 'progreso' && (
+        {systemScope === "escolar" && activeTab === 'progreso' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             {(systemIsTestMode || isOfficialElectionActive) && (
               <div className={`${systemIsTestMode ? 'bg-yellow-400 border-yellow-500' : 'bg-emerald-50 border-emerald-200'} border rounded-xl p-4 md:p-6 mb-8 flex flex-col md:flex-row items-center justify-between gap-4 shadow-md`}>
@@ -3284,9 +3310,6 @@ export default function AdminDashboard() {
               </div>
             </div>
           </div>
-        )}
-
-          </>
         )}
 
       </main>
@@ -3903,21 +3926,21 @@ export default function AdminDashboard() {
       {/* Mobile Navigation (Bottom Bar) */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border flex justify-around p-3 z-50 shadow-[0_-5px_15px_-5px_rgba(0,0,0,0.1)] pb-safe">
         {!isComite && (
-          <button onClick={() => setActiveTab("plantilla")} className={`p-2.5 rounded-xl transition-colors ${activeTab === 'plantilla' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:bg-secondary'}`} title="Plantilla">
+          <button onClick={() => setActiveTab("plantilla")} className={`p-2.5 rounded-xl transition-colors ${activeTab === 'plantilla' ? (systemScope === 'apafa' ? 'text-amber-600 bg-amber-600/10' : 'text-primary bg-primary/10') : 'text-muted-foreground hover:bg-secondary'}`} title="Plantilla">
             <Users className="w-6 h-6" />
           </button>
         )}
-        <button onClick={() => setActiveTab("padron")} className={`p-2.5 rounded-xl transition-colors ${activeTab === 'padron' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:bg-secondary'}`} title="Padrón">
+        <button onClick={() => setActiveTab("padron")} className={`p-2.5 rounded-xl transition-colors ${activeTab === 'padron' ? (systemScope === 'apafa' ? 'text-amber-600 bg-amber-600/10' : 'text-primary bg-primary/10') : 'text-muted-foreground hover:bg-secondary'}`} title="Padrón">
           <FileSpreadsheet className="w-6 h-6" />
         </button>
-        <button onClick={() => setActiveTab("progreso")} className={`p-2.5 rounded-xl transition-colors ${activeTab === 'progreso' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:bg-secondary'}`} title="Progreso">
+        <button onClick={() => setActiveTab("progreso")} className={`p-2.5 rounded-xl transition-colors ${activeTab === 'progreso' ? (systemScope === 'apafa' ? 'text-amber-600 bg-amber-600/10' : 'text-primary bg-primary/10') : 'text-muted-foreground hover:bg-secondary'}`} title="Progreso">
           <BarChart2 className="w-6 h-6" />
         </button>
-        <button onClick={() => setActiveTab("historial")} className={`p-2.5 rounded-xl transition-colors ${activeTab === 'historial' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:bg-secondary'}`} title="Historial">
+        <button onClick={() => setActiveTab("historial")} className={`p-2.5 rounded-xl transition-colors ${activeTab === 'historial' ? (systemScope === 'apafa' ? 'text-amber-600 bg-amber-600/10' : 'text-primary bg-primary/10') : 'text-muted-foreground hover:bg-secondary'}`} title="Historial">
           <Archive className="w-6 h-6" />
         </button>
         {isSuperAdmin && (
-          <button onClick={() => setActiveTab("accesos")} className={`p-2.5 rounded-xl transition-colors ${activeTab === 'accesos' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:bg-secondary'}`} title="Accesos">
+          <button onClick={() => setActiveTab("accesos")} className={`p-2.5 rounded-xl transition-colors ${activeTab === 'accesos' ? (systemScope === 'apafa' ? 'text-amber-600 bg-amber-600/10' : 'text-primary bg-primary/10') : 'text-muted-foreground hover:bg-secondary'}`} title="Accesos">
             <ShieldCheck className="w-6 h-6" />
           </button>
         )}

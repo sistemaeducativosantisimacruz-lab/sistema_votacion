@@ -24,10 +24,19 @@ import { parseApafaWorkbook, parseApafaWorkbooks } from "@/lib/apafaExcelParser"
 interface ApafaAdminViewProps {
   isSuperAdmin: boolean;
   currentUser: any;
+  activeTab?: "plantilla" | "padron" | "progreso";
+  setActiveTab?: (tab: "plantilla" | "padron" | "progreso") => void;
 }
 
-export default function ApafaAdminView({ isSuperAdmin, currentUser }: ApafaAdminViewProps) {
-  const [activeTab, setActiveTab] = useState<"plantilla" | "padron" | "progreso">("plantilla");
+export default function ApafaAdminView({ 
+  isSuperAdmin, 
+  currentUser,
+  activeTab: propActiveTab = "plantilla",
+  setActiveTab: propSetActiveTab
+}: ApafaAdminViewProps) {
+  const [internalTab, setInternalTab] = useState<"plantilla" | "padron" | "progreso">("plantilla");
+  const activeTab = propSetActiveTab ? propActiveTab : internalTab;
+  const setActiveTab = propSetActiveTab || setInternalTab;
   const [workspace, setWorkspace] = useState<"oficial" | "simulacro">("oficial");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
