@@ -18,8 +18,24 @@ export default function StudentLoginClient({ initialVotingMode }: StudentLoginCl
   const [error, setError] = useState("");
   const router = useRouter();
   
-  // Modo inicializado directamente desde el servidor (sin parpadeos)
-  const [votingMode, setVotingMode] = useState<"escolar" | "apafa">(initialVotingMode);
+  // Modo inicializado desde el servidor o localStorage (sin parpadeos)
+  const [votingMode, setVotingMode] = useState<"escolar" | "apafa">(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("portal_voting_mode");
+      if (saved === "apafa" || saved === "escolar") return saved;
+    }
+    return initialVotingMode;
+  });
+
+  // Sincronizar con localStorage en el montaje del cliente si difiere
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("portal_voting_mode");
+      if (saved && (saved === "apafa" || saved === "escolar") && saved !== votingMode) {
+        setVotingMode(saved);
+      }
+    }
+  }, []);
 
   const [activeYear, setActiveYear] = useState("2027");
   const [activeName, setActiveName] = useState(initialVotingMode === "apafa" ? "ELECCIONES APAFA" : "ELECCIONES ESCOLARES");
@@ -172,7 +188,12 @@ export default function StudentLoginClient({ initialVotingMode }: StudentLoginCl
   };
 
   const toggleVotingMode = () => {
-    setVotingMode(prev => prev === "escolar" ? "apafa" : "escolar");
+    const nextMode = votingMode === "escolar" ? "apafa" : "escolar";
+    setVotingMode(nextMode);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("portal_voting_mode", nextMode);
+      document.cookie = `public_voting_mode=${nextMode}; path=/; max-age=31536000; SameSite=Lax`;
+    }
     setError("");
     setShowInactiveMessage(false);
     setDni("");

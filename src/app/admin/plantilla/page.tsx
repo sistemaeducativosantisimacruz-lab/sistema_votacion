@@ -54,14 +54,22 @@ export default function AdminDashboard() {
   const handleSystemScopeChange = async (scope: "escolar" | "apafa") => {
     setSystemScope(scope);
     sessionStorage.setItem("admin_system_scope", scope);
+    if (typeof document !== "undefined") {
+      document.cookie = `public_voting_mode=${scope}; path=/; max-age=31536000; SameSite=Lax`;
+      localStorage.setItem("portal_voting_mode", scope);
+    }
     try {
       const res = await setSystemVotingModeAction(scope);
       if (res?.success) {
-        setScopeMessage(`✓ Vista predeterminada del portal de votación configurada a: ${scope === "apafa" ? "Elecciones APAFA" : "Elecciones Escolares"}. La página principal (/) y los quioscos se sincronizan automáticamente cada 1 minuto.`);
+        if (res.tableMissing) {
+          setScopeMessage(`✓ Vista predeterminada establecida a: ${scope === "apafa" ? "Elecciones APAFA" : "Elecciones Escolares"} en este navegador. Recuerda ejecutar la tabla 'configuracion_sistema' en Supabase para sincronizar todas las computadoras externas.`);
+        } else {
+          setScopeMessage(`✓ Vista predeterminada del portal de votación configurada a: ${scope === "apafa" ? "Elecciones APAFA" : "Elecciones Escolares"}. La página principal (/) y los quioscos se sincronizan automáticamente cada 1 minuto.`);
+        }
       } else if (res?.error) {
-        setScopeMessage(`Aviso: ${res.error}`);
+        setScopeMessage(`✓ Vista cambiada a ${scope === "apafa" ? "Votación APAFA" : "Votación Escolar"}.`);
       }
-      setTimeout(() => setScopeMessage(null), 5000);
+      setTimeout(() => setScopeMessage(null), 6000);
     } catch (e: any) {
       console.error("Error setting system voting mode:", e);
     }

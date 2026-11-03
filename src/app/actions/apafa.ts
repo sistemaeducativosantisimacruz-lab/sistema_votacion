@@ -688,12 +688,11 @@ export async function getProgresoApafaDataAction() {
 
 export async function getSystemVotingModeAction(): Promise<{ modo: "escolar" | "apafa" }> {
   try {
-    // 1. Intentar leer desde cookies primero para SSR ultrarrápido
+    // 1. Intentar leer desde cookies primero para SSR ultrarrápido y persistencia local
     try {
       const cookieStore = await cookies();
       const cookieMode = cookieStore.get("public_voting_mode")?.value;
       if (cookieMode === "apafa" || cookieMode === "escolar") {
-        // Retornamos el modo de la cookie pero sincronizamos con DB si es posible
         return { modo: cookieMode };
       }
     } catch (e) {
@@ -701,28 +700,36 @@ export async function getSystemVotingModeAction(): Promise<{ modo: "escolar" | "
     }
 
     // 2. Consultar tabla de configuración en Supabase
-    const { data, error } = await supabaseAdmin
-      .from("configuracion_sistema")
-      .select("valor")
-      .eq("clave", "modo_votacion")
-      .maybeSingle();
+    try {
+      const { data, error } = await supabaseAdmin
+        .from("configuracion_sistema")
+        .select("valor")
+        .eq("clave", "modo_votacion")
+        .maybeSingle();
 
-    if (!error && data?.valor) {
-      if (data.valor === "apafa" || data.valor === "escolar") {
-        return { modo: data.valor };
+      if (!error && data?.valor) {
+        if (data.valor === "apafa" || data.valor === "escolar") {
+          return { modo: data.valor };
+        }
       }
+    } catch (e) {
+      // Si la tabla configuracion_sistema no existe aún en schema cache, continuar
     }
 
-    // 3. Fallback si la tabla aún no existe: inferir por elección activa
-    const { data: apafaActive } = await supabaseAdmin
-      .from("elecciones_apafa")
-      .select("id")
-      .eq("esta_activa", true)
-      .limit(1)
-      .maybeSingle();
+    // 3. Fallback: inferir por elección de APAFA activa
+    try {
+      const { data: apafaActive } = await supabaseAdmin
+        .from("elecciones_apafa")
+        .select("id")
+        .eq("esta_activa", true)
+        .limit(1)
+        .maybeSingle();
 
-    if (apafaActive) {
-      return { modo: "apafa" };
+      if (apafaActive) {
+        return { modo: "apafa" };
+      }
+    } catch (e) {
+      // Ignorar
     }
 
     return { modo: "escolar" };
@@ -735,22 +742,7 @@ export async function setSystemVotingModeAction(modo: "escolar" | "apafa") {
   try {
     await ensureSuperAdmin();
 
-    const { error } = await supabaseAdmin
-      .from("configuracion_sistema")
-      .upsert({
-        clave: "modo_votacion",
-        valor: modo,
-        actualizado_en: new Date().toISOString()
-      }, { onConflict: "clave" });
-
-    if (error) {
-      if (error.message.includes("does not exist") || error.code === "42P01") {
-        throw new Error("La tabla configuracion_sistema aún no existe en Supabase. Ejecuta el script supabase_apafa.sql.");
-      }
-      throw error;
-    }
-
-    // Guardar también en cookies para que SSR en la ruta raíz '/' lo lea al instante en cada recarga
+    // 1. Guardar SIEMPRE en cookies de inmediato (garantiza que el navegador actual y SSR funcionen sin fallar)
     try {
       const cookieStore = await cookies();
       cookieStore.set("public_voting_mode", modo, {
@@ -758,11 +750,39 @@ export async function setSystemVotingModeAction(modo: "escolar" | "apafa") {
         maxAge: 60 * 60 * 24 * 365, // 1 año
         sameSite: "lax",
       });
-    } catch (e) {
-      // Continuar si la cookie no pudo ser escrita
+    } catch (cookieErr) {
+      console.warn("Aviso al guardar cookie public_voting_mode:", cookieErr);
     }
 
-    return { success: true, modo };
+    // 2. Intentar guardar en la tabla configuracion_sistema de Supabase
+    let tableMissing = false;
+    try {
+      const { error } = await supabaseAdmin
+        .from("configuracion_sistema")
+        .upsert({
+          clave: "modo_votacion",
+          valor: modo,
+          actualizado_en: new Date().toISOString()
+        }, { onConflict: "clave" });
+
+      if (error) {
+        // Verificar si es porque la tabla no existe en el schema cache de PostgREST
+        if (
+          error.message?.includes("schema cache") || 
+          error.message?.includes("does not exist") || 
+          error.code === "42P01" ||
+          error.code === "PGRST205"
+        ) {
+          tableMissing = true;
+        } else {
+          throw error;
+        }
+      }
+    } catch (dbErr: any) {
+      tableMissing = true;
+    }
+
+    return { success: true, modo, tableMissing };
   } catch (err: any) {
     return { error: err.message || "Error al actualizar el modo de votación del sistema." };
   }
