@@ -158,16 +158,94 @@ export async function promoteStudentToComiteAction(studentId: string, roleTitle:
   }
 }
 
-export async function updateCargoAction(studentId: string, newCargo: string) {
+export async function promoteParentToComiteAction(parentData: {
+  dni: string;
+  nombres: string;
+  apellidos: string;
+  cargo: string;
+  contrasena: string;
+}) {
+  try {
+    await ensureSuperAdmin();
+
+    const payloadWithCargo: any = {
+      dni: parentData.dni,
+      nombres: parentData.nombres,
+      apellidos: parentData.apellidos,
+      contrasena: parentData.contrasena,
+      rol: "comite_apafa",
+      cargo: parentData.cargo || "Comité APAFA"
+    };
+
+    const payloadWithoutCargo: any = {
+      dni: parentData.dni,
+      nombres: parentData.nombres,
+      apellidos: parentData.apellidos,
+      contrasena: parentData.contrasena,
+      rol: "comite_apafa"
+    };
+
+    const { data: existing } = await supabaseAdmin
+      .from("administradores")
+      .select("id")
+      .eq("dni", parentData.dni)
+      .maybeSingle();
+
+    if (existing) {
+      const { error } = await supabaseAdmin
+        .from("administradores")
+        .update(payloadWithCargo)
+        .eq("id", existing.id);
+
+      if (error && error.message?.includes("cargo")) {
+        const res2 = await supabaseAdmin
+          .from("administradores")
+          .update(payloadWithoutCargo)
+          .eq("id", existing.id);
+        if (res2.error) throw res2.error;
+      } else if (error) {
+        throw error;
+      }
+    } else {
+      const { error } = await supabaseAdmin
+        .from("administradores")
+        .insert([payloadWithCargo]);
+
+      if (error && error.message?.includes("cargo")) {
+        const res2 = await supabaseAdmin
+          .from("administradores")
+          .insert([payloadWithoutCargo]);
+        if (res2.error) throw res2.error;
+      } else if (error) {
+        throw error;
+      }
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { error: err.message || "Error al asignar acceso al comité de APAFA." };
+  }
+}
+
+export async function updateCargoAction(id: string, newCargo: string, isApafa: boolean = false) {
   try {
     await ensureSuperAdmin();
     
-    const { error } = await supabaseAdmin
-      .from('estudiantes')
-      .update({ cargo: newCargo })
-      .eq('id', studentId);
-      
-    if (error) throw error;
+    if (isApafa) {
+      const { error } = await supabaseAdmin
+        .from('administradores')
+        .update({ cargo: newCargo })
+        .eq('id', id);
+        
+      if (error && !error.message?.includes("cargo")) throw error;
+    } else {
+      const { error } = await supabaseAdmin
+        .from('estudiantes')
+        .update({ cargo: newCargo })
+        .eq('id', id);
+        
+      if (error) throw error;
+    }
     return { success: true };
   } catch (err: any) {
     return { error: err.message };

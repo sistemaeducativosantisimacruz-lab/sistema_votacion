@@ -69,8 +69,8 @@ export async function loginAdminAction(dni: string, contrasena: string) {
       grado: user.grado || "", // Administradores puros podrían no tener grado
       seccion: user.seccion || "",
       nivel: user.nivel || "",
-      rol: user.rol,
-      cargo: user.cargo || "", // Administradores puros podrían no tener cargo
+      rol: user.rol === "comite_apafa" ? "comite" : user.rol,
+      cargo: user.cargo || (user.rol === "comite_apafa" ? "Comité APAFA" : ""),
     });
 
     return { success: true };

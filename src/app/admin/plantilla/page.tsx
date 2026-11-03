@@ -9,7 +9,7 @@ import { saveAs } from "file-saver";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { getAdminSessionAction, logoutAdminAction } from "@/app/actions/auth";
-import { getAdminsAction, createManualAdminAction, editManualAdminAction, demoteAdminAction, promoteStudentToComiteAction, updateCargoAction, createStudentAction } from "@/app/actions/admin";
+import { getAdminsAction, createManualAdminAction, editManualAdminAction, demoteAdminAction, promoteStudentToComiteAction, promoteParentToComiteAction, updateCargoAction, createStudentAction } from "@/app/actions/admin";
 import { deleteElectionAction, updateElectionStatusAction, deletePartyAction, updateStudentsVoteStatusAction, deleteVotesByElectionAction, insertMockVotesAction, insertElectionAction, upsertPartyAction, updateElectionDataAction, updatePartyCandidatesAction, getCargosAction } from "@/app/actions/plantilla";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -178,6 +178,7 @@ export default function AdminDashboard() {
   // Roles Management State
   const [searchDni, setSearchDni] = useState("");
   const [foundStudent, setFoundStudent] = useState<any>(null);
+  const [foundParent, setFoundParent] = useState<any>(null);
   const [newPassword, setNewPassword] = useState("");
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [selectedCargo, setSelectedCargo] = useState<"Secretario(a)" | "Vocal" | "VicePresidente" | "Presidente">("Vocal");
@@ -895,6 +896,7 @@ export default function AdminDashboard() {
       setRoleMessage("");
       setSearchDni("");
       setFoundStudent(null);
+      setFoundParent(null);
       setNewPassword("");
       setShowNewPassword(false);
     }
@@ -1874,14 +1876,72 @@ export default function AdminDashboard() {
     } else {
       setRoleMessage(`¡Estudiante promovido a Comité (${selectedCargo}) con éxito!`);
       setFoundStudent(null);
+      setFoundParent(null);
       setNewPassword("");
       setSearchDni("");
       loadAdmins();
     }
   };
 
-  const handleUpdateCargo = async (id: string, newCargo: string) => {
-    const result = await updateCargoAction(id, newCargo);
+  const handleSearchParent = async () => {
+    if (!searchDni) return;
+    setRoleMessage("");
+    setFoundParent(null);
+    setLoading(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('apoderados')
+        .select('*')
+        .eq('dni', searchDni.trim())
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (!data) {
+        setRoleMessage("No se encontró ningún padre/apoderado con ese DNI en el padrón de APAFA.");
+      } else {
+        setFoundParent(data);
+        setNewPassword(generateAutoPassword(data.nombres, data.apellidos, data.dni));
+      }
+    } catch (err: any) {
+      setRoleMessage(err.message || "Error al buscar apoderado.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePromoteParentToComite = async () => {
+    if (!foundParent || !newPassword) return;
+    setLoading(true);
+
+    try {
+      const result = await promoteParentToComiteAction({
+        dni: foundParent.dni,
+        nombres: foundParent.nombres,
+        apellidos: foundParent.apellidos,
+        cargo: selectedCargo,
+        contrasena: newPassword
+      });
+
+      if (result.error) {
+        setRoleMessage("Error al asignar acceso: " + result.error);
+      } else {
+        setRoleMessage(`¡Acceso de Comité Electoral APAFA (${selectedCargo}) concedido con éxito a ${foundParent.nombres} ${foundParent.apellidos}!`);
+        setFoundParent(null);
+        setNewPassword("");
+        setSearchDni("");
+        loadAdmins();
+      }
+    } catch (err: any) {
+      setRoleMessage("Error al procesar la solicitud.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateCargo = async (id: string, newCargo: string, isApafa: boolean = false) => {
+    const result = await updateCargoAction(id, newCargo, isApafa);
 
     if (!result.error) {
       setEditingCargoId(null);
@@ -1891,7 +1951,8 @@ export default function AdminDashboard() {
 
   const handleDeleteComiteConfirm = async () => {
     if (!studentToRemove) return;
-    const result = await demoteAdminAction(studentToRemove.id, true);
+    const isStudentComite = studentToRemove.rol === 'comite';
+    const result = await demoteAdminAction(studentToRemove.id, isStudentComite);
 
     if (!result.error) {
       setStudentToRemove(null);
@@ -3117,22 +3178,24 @@ export default function AdminDashboard() {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               <div className="bg-card rounded-2xl p-6 border border-border shadow-sm h-fit">
-                <h3 className="text-lg font-semibold mb-4">Promover Estudiante</h3>
+                <h3 className="text-lg font-semibold mb-4">
+                  {systemScope === 'escolar' ? 'Promover Estudiante a Comité' : 'Asignar Padre de Familia a Comité APAFA'}
+                </h3>
                 
                 <div className="flex gap-2 mb-6">
                   <div className="relative flex-1">
                     <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                     <input 
                       type="text" 
-                      placeholder="DNI del estudiante..."
+                      placeholder={systemScope === 'escolar' ? "DNI del estudiante..." : "DNI del padre o madre de familia..."}
                       className="w-full pl-9 pr-4 py-2 rounded-lg border border-border bg-background focus:border-primary outline-none"
                       value={searchDni}
                       onChange={(e) => setSearchDni(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && searchDni && handleSearchStudent()}
+                      onKeyDown={(e) => e.key === 'Enter' && searchDni && (systemScope === 'escolar' ? handleSearchStudent() : handleSearchParent())}
                     />
                   </div>
                   <button 
-                    onClick={handleSearchStudent}
+                    onClick={systemScope === 'escolar' ? handleSearchStudent : handleSearchParent}
                     disabled={loading || !searchDni}
                     className="bg-secondary text-secondary-foreground px-4 py-2 rounded-lg font-semibold hover:bg-secondary/80 disabled:opacity-50"
                   >
@@ -3146,7 +3209,8 @@ export default function AdminDashboard() {
                   </div>
                 )}
 
-                {foundStudent && (
+                {/* Resultado Estudiante (Modo Escolar) */}
+                {systemScope === 'escolar' && foundStudent && (
                   <div className="border border-border rounded-xl p-4 bg-secondary/20 animate-in fade-in">
                     <div className="flex items-center gap-3 mb-4">
                       <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center text-primary">
@@ -3201,6 +3265,62 @@ export default function AdminDashboard() {
                     )}
                   </div>
                 )}
+
+                {/* Resultado Padre de Familia (Modo APAFA) */}
+                {systemScope === 'apafa' && foundParent && (
+                  <div className="border border-border rounded-xl p-4 bg-secondary/20 animate-in fade-in">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-10 h-10 bg-amber-500/15 rounded-full flex items-center justify-center text-amber-600 font-bold text-xs uppercase">
+                        {foundParent.parentesco?.charAt(0) || "P"}
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm">{foundParent.apellidos}, {foundParent.nombres}</p>
+                        <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                          <span className="font-mono font-semibold text-amber-600">DNI: {foundParent.dni}</span>
+                          {foundParent.parentesco && <span>• {foundParent.parentesco}</span>}
+                          {foundParent.nivel && <span className="capitalize">• {foundParent.nivel}</span>}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex gap-2">
+                        <select
+                          value={selectedCargo}
+                          onChange={(e) => setSelectedCargo(e.target.value as any)}
+                          className="w-1/3 px-3 py-2 rounded-lg border border-border bg-background focus:border-amber-500 outline-none text-sm font-medium"
+                        >
+                          <option value="Presidente">Presidente</option>
+                          <option value="Tesorero(a)">Tesorero(a)</option>
+                          <option value="Vocal">Vocal</option>
+                        </select>
+                        <div className="flex-1 relative">
+                          <input 
+                            type={showNewPassword ? "text" : "password"} 
+                            placeholder="Asignar contraseña..."
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                            className="w-full px-3 py-2 pr-10 rounded-lg border border-border bg-background focus:border-amber-500 outline-none text-sm"
+                          />
+                          <button 
+                            type="button" 
+                            onClick={() => setShowNewPassword(!showNewPassword)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          >
+                            {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={handlePromoteParentToComite}
+                        disabled={!newPassword || loading}
+                        className="w-full bg-amber-600 hover:bg-amber-700 text-white py-2 rounded-lg font-semibold disabled:opacity-50 text-sm transition-colors"
+                      >
+                        Conceder Acceso al Comité Electoral APAFA
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex flex-col gap-8 h-fit">
@@ -3252,78 +3372,161 @@ export default function AdminDashboard() {
 
                 {/* Comité Electoral Actual */}
                 <div className="bg-card rounded-2xl p-6 border border-border shadow-sm">
-                  <h3 className="text-lg font-semibold mb-4">Comité Electoral Actual</h3>
+                  <h3 className="text-lg font-semibold mb-4">
+                    {systemScope === 'escolar' ? 'Comité Electoral Escolar' : 'Comité Electoral APAFA'}
+                  </h3>
                   <div className="space-y-3">
-                    {adminsList.filter(a => a.rol === 'comite').map(comite => (
-                      <div key={comite.id} className="flex justify-between items-center p-3 border border-border rounded-xl hover:bg-secondary/30 transition-colors">
-                        <div>
-                          <p className="font-semibold text-sm">{comite.nombres} {comite.apellidos}</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                              {comite.cargo || 'Comité'}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">
-                              DNI: {comite.dni}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">
-                              C: {comite.contrasena}
-                            </span>
-                          </div>
-                        </div>
-                        
-                        <div className="flex gap-1 items-center">
-                          {editingCargoId === comite.id ? (
-                            <>
-                              <select
-                                value={editingCargoValue}
-                                onChange={(e) => setEditingCargoValue(e.target.value)}
-                                className="px-2 py-1 rounded border border-border bg-background text-xs outline-none focus:border-primary"
-                              >
-                                <option value="Presidente">Presidente</option>
-                                <option value="VicePresidente">VicePresidente</option>
-                                <option value="Secretario(a)">Secretario(a)</option>
-                                <option value="Vocal">Vocal</option>
-                              </select>
+                    {systemScope === 'escolar' ? (
+                      <>
+                        {adminsList.filter(a => a.rol === 'comite').map(comite => (
+                          <div key={comite.id} className="flex justify-between items-center p-3 border border-border rounded-xl hover:bg-secondary/30 transition-colors">
+                            <div>
+                              <p className="font-semibold text-sm">{comite.nombres} {comite.apellidos}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                                  {comite.cargo || 'Comité'}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">
+                                  DNI: {comite.dni}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">
+                                  C: {comite.contrasena}
+                                </span>
+                              </div>
+                            </div>
+                            
+                            <div className="flex gap-1 items-center">
+                              {editingCargoId === comite.id ? (
+                                <>
+                                  <select
+                                    value={editingCargoValue}
+                                    onChange={(e) => setEditingCargoValue(e.target.value)}
+                                    className="px-2 py-1 rounded border border-border bg-background text-xs outline-none focus:border-primary"
+                                  >
+                                    <option value="Presidente">Presidente</option>
+                                    <option value="VicePresidente">VicePresidente</option>
+                                    <option value="Secretario(a)">Secretario(a)</option>
+                                    <option value="Vocal">Vocal</option>
+                                  </select>
+                                  <button 
+                                    onClick={() => handleUpdateCargo(comite.id, editingCargoValue, false)}
+                                    className="p-2 text-muted-foreground hover:text-green-600 hover:bg-green-500/10 rounded-lg transition-colors"
+                                    title="Guardar Cargo"
+                                  >
+                                    <CheckCircle2 className="w-4 h-4" />
+                                  </button>
+                                  <button 
+                                    onClick={() => setEditingCargoId(null)}
+                                    className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+                                    title="Cancelar"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </>
+                              ) : (
+                                <button 
+                                  onClick={() => {
+                                    setEditingCargoId(comite.id);
+                                    setEditingCargoValue(comite.cargo || "Vocal");
+                                  }}
+                                  className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                                  title="Editar Cargo"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                              )}
+                              
                               <button 
-                                onClick={() => handleUpdateCargo(comite.id, editingCargoValue)}
-                                className="p-2 text-muted-foreground hover:text-green-600 hover:bg-green-500/10 rounded-lg transition-colors"
-                                title="Guardar Cargo"
-                              >
-                                <CheckCircle2 className="w-4 h-4" />
-                              </button>
-                              <button 
-                                onClick={() => setEditingCargoId(null)}
+                                onClick={() => setStudentToRemove(comite)}
                                 className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
-                                title="Cancelar"
+                                title="Revocar acceso"
                               >
-                                <X className="w-4 h-4" />
+                                <UserX className="w-4 h-4" />
                               </button>
-                            </>
-                          ) : (
-                            <button 
-                              onClick={() => {
-                                setEditingCargoId(comite.id);
-                                setEditingCargoValue(comite.cargo || "Vocal");
-                              }}
-                              className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
-                              title="Editar Cargo"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </button>
-                          )}
-                          
-                          <button 
-                            onClick={() => setStudentToRemove(comite)}
-                            className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
-                            title="Revocar acceso"
-                          >
-                            <UserX className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                    {adminsList.filter(a => a.rol === 'comite').length === 0 && (
-                      <p className="text-sm text-muted-foreground">No hay miembros del comité electoral asignados.</p>
+                            </div>
+                          </div>
+                        ))}
+                        {adminsList.filter(a => a.rol === 'comite').length === 0 && (
+                          <p className="text-sm text-muted-foreground">No hay miembros del comité electoral escolar asignados.</p>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {adminsList.filter(a => a.rol === 'comite_apafa').map(comite => (
+                          <div key={comite.id} className="flex justify-between items-center p-3 border border-border rounded-xl hover:bg-secondary/30 transition-colors">
+                            <div>
+                              <p className="font-semibold text-sm">{comite.nombres} {comite.apellidos}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                                  {comite.cargo || 'Comité APAFA'}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">
+                                  DNI: {comite.dni}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground font-mono bg-secondary px-1.5 py-0.5 rounded border border-border">
+                                  C: {comite.contrasena}
+                                </span>
+                              </div>
+                            </div>
+                            
+                            <div className="flex gap-1 items-center">
+                              {editingCargoId === comite.id ? (
+                                <>
+                                  <select
+                                    value={editingCargoValue}
+                                    onChange={(e) => setEditingCargoValue(e.target.value)}
+                                    className="px-2 py-1 rounded border border-border bg-background text-xs outline-none focus:border-amber-500"
+                                  >
+                                    <option value="Presidente">Presidente</option>
+                                    <option value="Tesorero(a)">Tesorero(a)</option>
+                                    <option value="Vocal">Vocal</option>
+                                  </select>
+                                  <button 
+                                    onClick={() => handleUpdateCargo(comite.id, editingCargoValue, true)}
+                                    className="p-2 text-muted-foreground hover:text-green-600 hover:bg-green-500/10 rounded-lg transition-colors"
+                                    title="Guardar Cargo"
+                                  >
+                                    <CheckCircle2 className="w-4 h-4" />
+                                  </button>
+                                  <button 
+                                    onClick={() => setEditingCargoId(null)}
+                                    className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+                                    title="Cancelar"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </>
+                              ) : (
+                                <button 
+                                  onClick={() => {
+                                    setEditingCargoId(comite.id);
+                                    setEditingCargoValue(comite.cargo || "Vocal");
+                                  }}
+                                  className="p-2 text-muted-foreground hover:text-amber-600 hover:bg-amber-500/10 rounded-lg transition-colors"
+                                  title="Editar Cargo"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                              )}
+                              
+                              <button 
+                                onClick={() => setStudentToRemove(comite)}
+                                className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+                                title="Revocar acceso"
+                              >
+                                <UserX className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        {adminsList.filter(a => a.rol === 'comite_apafa').length === 0 && (
+                          <div className="p-8 text-center border-2 border-dashed border-border rounded-xl">
+                            <Users className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
+                            <p className="text-sm font-semibold text-muted-foreground">No hay padres asignados al Comité Electoral de APAFA todavía.</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">Utiliza el buscador de la izquierda para asignar acceso a un padre o madre de familia.</p>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
