@@ -4,7 +4,8 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { 
   Users, Plus, Trash2, Save, FileSpreadsheet, Upload, AlertCircle, 
   CheckCircle2, PlayCircle, StopCircle, RefreshCw, Download, 
-  Search, BarChart2, Beaker, Check, X, Loader2, Sparkles
+  Search, BarChart2, Beaker, Check, X, Loader2, Sparkles,
+  Camera, Image as ImageIcon
 } from "lucide-react";
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
@@ -249,12 +250,52 @@ export default function ApafaAdminView({
     ]);
   };
 
+  const handleLogoUpload = (partyIndex: number, file: File) => {
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        // Redimensionar para no saturar la base de datos con un Base64 gigante (igual que estudiantes)
+        const canvas = document.createElement("canvas");
+        const MAX_WIDTH = 300;
+        const MAX_HEIGHT = 300;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const base64String = canvas.toDataURL(file.type || "image/jpeg", 0.75);
+          handleUpdateParty(partyIndex, "logo_url", base64String);
+        }
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleCandidateSearch = async (partyIdx: number, candIdx: number, query: string) => {
     const key = `${partyIdx}-${candIdx}`;
     setSearchQueryMap(prev => ({ ...prev, [key]: query }));
     setActiveSearchKey(key);
 
-    if (query.trim().length < 2) {
+    if (query.trim().length < 1) {
       setSearchResultsMap(prev => ({ ...prev, [key]: [] }));
       return;
     }
@@ -276,8 +317,8 @@ export default function ApafaAdminView({
     const candList = [...(updated[partyIdx].candidatos || [])];
     candList[candIdx] = {
       ...candList[candIdx],
-      nombre: apoderado.nombres ? `${apoderado.apellidos}, ${apoderado.nombres}` : apoderado.apellidos,
-      dni: apoderado.dni,
+      nombre: apoderado.nombres ? `${apoderado.apellidos}, ${apoderado.nombres}` : (apoderado.apellidos || apoderado.nombre || ""),
+      dni: apoderado.dni || "",
       parentesco: apoderado.parentesco || "APODERADO"
     };
     updated[partyIdx].candidatos = candList;
@@ -290,6 +331,7 @@ export default function ApafaAdminView({
   };
 
   const handleRemoveCandidate = (partyIdx: number, candIdx: number) => {
+    const key = `${partyIdx}-${candIdx}`;
     const updated = [...parties];
     const candList = [...(updated[partyIdx].candidatos || [])];
     candList[candIdx] = {
@@ -300,6 +342,7 @@ export default function ApafaAdminView({
     };
     updated[partyIdx].candidatos = candList;
     setParties(updated);
+    setActiveSearchKey(key);
   };
 
   const handleRemoveParty = async (partyId: string) => {
@@ -806,47 +849,114 @@ export default function ApafaAdminView({
               {parties.map((party, pIdx) => (
                 <div key={party.id || pIdx} className="bg-card border border-border/80 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
                   <div>
-                    {/* Header de la Lista */}
-                    <div className="flex items-start justify-between gap-4 pb-4 border-b border-border">
-                      <div className="flex-1 space-y-3">
-                        <div className="flex gap-3">
-                          <div className="w-24 space-y-1">
-                            <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">N° Lista</label>
-                            <input
-                              type="text"
-                              value={party.numero_lista || ""}
-                              onChange={(e) => handleUpdateParty(pIdx, "numero_lista", e.target.value)}
-                              placeholder="1"
-                              className="w-full px-3 py-1.5 text-sm font-bold rounded-lg border border-border bg-background outline-none text-center"
+                    {/* Header de la Lista con Logo y Datos */}
+                    <div className="flex items-start justify-between gap-4 pb-5 border-b border-border">
+                      <div className="flex gap-4 flex-1 flex-wrap sm:flex-nowrap">
+                        {/* Logo Preview & File Upload Box */}
+                        <div className="w-20 h-20 bg-background rounded-xl border border-dashed border-border flex flex-col items-center justify-center text-muted-foreground overflow-hidden shrink-0 relative group/img shadow-inner">
+                          {party.logo_url ? (
+                            <img src={party.logo_url} alt="Logo" className="w-full h-full object-cover" />
+                          ) : (
+                            <ImageIcon className="w-6 h-6 mb-1 opacity-50" />
+                          )}
+                          <label className="absolute inset-0 bg-black/60 hidden group-hover/img:flex flex-col items-center justify-center cursor-pointer transition-all text-white text-[10px] font-semibold">
+                            <Camera className="w-5 h-5 mb-0.5" />
+                            <span>Subir</span>
+                            <input 
+                              type="file" 
+                              accept="image/*"
+                              className="hidden"
+                              disabled={loading}
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files[0]) {
+                                  handleLogoUpload(pIdx, e.target.files[0]);
+                                }
+                              }}
                             />
-                          </div>
-                          <div className="flex-1 space-y-1">
-                            <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Nombre de la Lista / Partido</label>
-                            <input
-                              type="text"
-                              value={party.nombre || ""}
-                              onChange={(e) => handleUpdateParty(pIdx, "nombre", e.target.value)}
-                              placeholder="Ej. Unidos por el Colegio"
-                              className="w-full px-3 py-1.5 text-sm font-bold rounded-lg border border-border bg-background outline-none"
-                            />
-                          </div>
+                          </label>
                         </div>
 
-                        <div className="space-y-1">
-                          <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">URL del Logo / Emblema</label>
-                          <input
-                            type="text"
-                            value={party.logo_url || ""}
-                            onChange={(e) => handleUpdateParty(pIdx, "logo_url", e.target.value)}
-                            placeholder="https://ejemplo.com/logo.png o /logos/lista1.png"
-                            className="w-full px-3 py-1.5 text-xs rounded-lg border border-border bg-background outline-none font-mono"
-                          />
+                        {/* Campos de Nombre, Número y Opciones de Logo */}
+                        <div className="flex-1 space-y-3 min-w-[200px]">
+                          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                            <div className="sm:col-span-1 space-y-1">
+                              <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">N° Lista</label>
+                              <input
+                                type="text"
+                                value={party.numero_lista || ""}
+                                onChange={(e) => handleUpdateParty(pIdx, "numero_lista", e.target.value)}
+                                placeholder="1"
+                                className="w-full px-3 py-1.5 text-sm font-bold rounded-lg border border-border bg-background focus:border-amber-500 outline-none text-center"
+                              />
+                            </div>
+                            <div className="sm:col-span-3 space-y-1">
+                              <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Nombre de la Lista / Partido</label>
+                              <input
+                                type="text"
+                                value={party.nombre || ""}
+                                onChange={(e) => handleUpdateParty(pIdx, "nombre", e.target.value)}
+                                placeholder="Ej. Integración Familiar 2026"
+                                className="w-full px-3 py-1.5 text-sm font-bold rounded-lg border border-border bg-background focus:border-amber-500 outline-none"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Controles de Logo: Subir archivo, Quitar Logo y URL opcional */}
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between items-center">
+                              <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                                Logo de la Lista
+                              </label>
+                              {party.logo_url && (
+                                <button 
+                                  type="button"
+                                  onClick={() => handleUpdateParty(pIdx, "logo_url", "")}
+                                  className="text-destructive hover:underline text-[11px] font-semibold"
+                                >
+                                  Quitar Logo
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <label className="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg border border-dashed border-border bg-background hover:border-amber-500/50 hover:bg-amber-500/5 cursor-pointer transition-colors text-foreground">
+                                <Upload className="w-3.5 h-3.5 text-amber-600" />
+                                {party.logo_url ? "Cambiar Imagen de Logo" : "Subir Archivo de Logo"}
+                                <input 
+                                  type="file" 
+                                  accept="image/*"
+                                  className="hidden"
+                                  disabled={loading}
+                                  onChange={(e) => {
+                                    if (e.target.files && e.target.files[0]) {
+                                      handleLogoUpload(pIdx, e.target.files[0]);
+                                    }
+                                  }}
+                                />
+                              </label>
+
+                              <div className="relative flex-1">
+                                <input
+                                  type="text"
+                                  value={party.logo_url && party.logo_url.startsWith("data:") ? "(Imagen cargada)" : (party.logo_url || "")}
+                                  onChange={(e) => {
+                                    if (!e.target.value.startsWith("(Imagen")) {
+                                      handleUpdateParty(pIdx, "logo_url", e.target.value);
+                                    }
+                                  }}
+                                  placeholder="o pegar URL..."
+                                  className="w-full px-3 py-1.5 text-xs rounded-lg border border-border bg-background focus:border-amber-500 outline-none font-mono text-muted-foreground"
+                                />
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       </div>
 
                       <button
+                        type="button"
                         onClick={() => handleRemoveParty(party.id)}
-                        className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-xl transition-colors"
+                        className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-xl transition-colors shrink-0"
                         title="Eliminar lista"
                       >
                         <Trash2 className="w-5 h-5" />
@@ -862,35 +972,35 @@ export default function ApafaAdminView({
                         <span className="text-[11px] text-muted-foreground font-medium">Búsqueda directa por DNI o Nombres</span>
                       </div>
 
-                      <div className="space-y-2.5">
+                      <div className="space-y-3">
                         {(party.candidatos || []).map((cand: any, cIdx: number) => {
                           const searchKey = `${pIdx}-${cIdx}`;
                           const isAssigned = Boolean(cand.nombre || cand.dni);
                           const currentQuery = searchQueryMap[searchKey] || "";
                           const isSearching = isSearchingMap[searchKey] || false;
                           const results = searchResultsMap[searchKey] || [];
-                          const isDropdownOpen = activeSearchKey === searchKey && currentQuery.trim().length >= 2;
+                          const hasSearchActive = activeSearchKey === searchKey && currentQuery.trim().length >= 1;
 
                           return (
-                            <div key={cIdx} className="relative">
+                            <div key={cIdx} className="rounded-xl border border-border bg-card p-3 space-y-2 transition-all">
                               {isAssigned ? (
-                                <div className="flex items-center justify-between p-2.5 rounded-xl border border-border/80 bg-secondary/40 hover:bg-secondary/60 transition-colors">
-                                  <div className="flex items-center gap-2.5 min-w-0">
-                                    <span className="shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/20">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <span className="shrink-0 px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
                                       {cand.cargo}
                                     </span>
                                     <div className="min-w-0">
-                                      <p className="text-xs font-bold text-foreground truncate">
+                                      <p className="text-sm font-bold text-foreground truncate">
                                         {cand.nombre}
                                       </p>
-                                      <div className="flex items-center gap-2 mt-0.5">
+                                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                                         {cand.dni && (
-                                          <span className="text-[11px] font-mono px-1.5 py-0.2 rounded bg-background border border-border text-muted-foreground font-semibold">
+                                          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-secondary border border-border text-foreground">
                                             DNI: {cand.dni}
                                           </span>
                                         )}
                                         {cand.parentesco && (
-                                          <span className="text-[11px] text-muted-foreground">
+                                          <span className="text-xs text-muted-foreground font-medium">
                                             • {cand.parentesco}
                                           </span>
                                         )}
@@ -901,31 +1011,37 @@ export default function ApafaAdminView({
                                   <button
                                     type="button"
                                     onClick={() => handleRemoveCandidate(pIdx, cIdx)}
-                                    className="shrink-0 ml-2 px-2.5 py-1 rounded-lg text-xs font-semibold text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-1"
-                                    title="Quitar o cambiar este candidato"
+                                    className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold text-muted-foreground hover:text-destructive hover:bg-destructive/10 border border-border hover:border-destructive/30 transition-colors flex items-center gap-1.5 cursor-pointer"
+                                    title="Cambiar este candidato"
                                   >
                                     <X className="w-3.5 h-3.5" /> Cambiar
                                   </button>
                                 </div>
                               ) : (
-                                <div className="relative">
-                                  <div className="flex items-center gap-2 p-1.5 rounded-xl border border-dashed border-border bg-background focus-within:border-amber-500 transition-colors">
-                                    <span className="shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wide bg-muted text-muted-foreground min-w-[90px] text-center">
+                                <div className="space-y-2">
+                                  {/* Input de Búsqueda */}
+                                  <div className="flex items-center gap-2">
+                                    <span className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide bg-secondary text-foreground border border-border min-w-[100px] text-center">
                                       {cand.cargo}
                                     </span>
 
                                     <div className="relative flex-1">
-                                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                                       <input
                                         type="text"
                                         placeholder={`Buscar ${cand.cargo} por DNI o Nombres...`}
                                         value={currentQuery}
                                         onChange={(e) => handleCandidateSearch(pIdx, cIdx, e.target.value)}
-                                        onFocus={() => setActiveSearchKey(searchKey)}
-                                        className="w-full pl-8 pr-7 py-1 text-xs rounded-lg bg-transparent outline-none placeholder:text-muted-foreground/60"
+                                        onFocus={() => {
+                                          setActiveSearchKey(searchKey);
+                                          if (currentQuery && (!results || results.length === 0)) {
+                                            handleCandidateSearch(pIdx, cIdx, currentQuery);
+                                          }
+                                        }}
+                                        className="w-full pl-9 pr-8 py-1.5 text-xs rounded-lg border border-border bg-background focus:border-amber-500 outline-none text-foreground placeholder:text-muted-foreground"
                                       />
                                       {isSearching ? (
-                                        <Loader2 className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-amber-600 animate-spin" />
+                                        <Loader2 className="w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 text-amber-600 animate-spin" />
                                       ) : currentQuery ? (
                                         <button
                                           type="button"
@@ -935,78 +1051,99 @@ export default function ApafaAdminView({
                                           }}
                                           className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                         >
-                                          <X className="w-3 h-3" />
+                                          <X className="w-3.5 h-3.5" />
                                         </button>
                                       ) : null}
                                     </div>
                                   </div>
 
-                                  {/* Dropdown de Búsqueda de Apoderados */}
-                                  {isDropdownOpen && (
-                                    <>
-                                      <div
-                                        className="fixed inset-0 z-40"
-                                        onClick={() => setActiveSearchKey(null)}
-                                      />
-                                      <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-popover border border-border rounded-xl shadow-xl max-h-56 overflow-y-auto p-1.5 animate-in fade-in zoom-in-95">
-                                        {isSearching ? (
-                                          <div className="p-3 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
-                                            <Loader2 className="w-4 h-4 animate-spin text-amber-600" /> Buscando en el padrón de padres...
-                                          </div>
-                                        ) : results.length > 0 ? (
-                                          <div className="space-y-1">
-                                            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                                              Apoderados encontrados ({results.length})
-                                            </div>
-                                            {results.map((ap: any) => (
-                                              <button
-                                                key={ap.id}
-                                                type="button"
-                                                onClick={() => handleSelectCandidate(pIdx, cIdx, ap)}
-                                                className="w-full text-left p-2 rounded-lg hover:bg-secondary transition-colors flex items-center justify-between gap-2 group"
-                                              >
-                                                <div className="min-w-0">
-                                                  <p className="font-bold text-xs text-foreground group-hover:text-amber-600 transition-colors truncate">
-                                                    {ap.apellidos}, {ap.nombres}
-                                                  </p>
-                                                  <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate">
-                                                    <span className="font-mono font-bold text-amber-600">DNI: {ap.dni}</span>
-                                                    {ap.parentesco && <span>• {ap.parentesco}</span>}
-                                                    {ap.nivel && <span className="capitalize">• {ap.nivel}</span>}
-                                                    {ap.grado && <span>{ap.grado} "{ap.seccion}"</span>}
-                                                  </p>
-                                                </div>
-                                                <span className="shrink-0 text-[11px] font-bold text-amber-600 bg-amber-500/10 px-2 py-1 rounded group-hover:bg-amber-600 group-hover:text-white transition-colors">
-                                                  Asignar
-                                                </span>
-                                              </button>
-                                            ))}
-                                          </div>
-                                        ) : (
-                                          <div className="p-2.5 text-center text-xs text-muted-foreground">
-                                            No se encontraron apoderados que coincidan con "{currentQuery}".
-                                          </div>
-                                        )}
-
-                                        {/* Opción para asignar manualmente si no está en el padrón */}
+                                  {/* Panel de Resultados IN-FLOW (Empuja hacia abajo, NO se sobrepone jamás) */}
+                                  {hasSearchActive && (
+                                    <div className="mt-2 rounded-xl border border-amber-500/40 bg-secondary/30 p-2.5 space-y-2 animate-in fade-in">
+                                      <div className="flex items-center justify-between px-1">
+                                        <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                                          <Users className="w-3.5 h-3.5 text-amber-600" /> Resultados del Padrón ({results.length})
+                                        </span>
                                         <button
                                           type="button"
-                                          onClick={() => {
-                                            const raw = currentQuery.trim();
-                                            const isDni = /^\d{8}$/.test(raw);
-                                            handleSelectCandidate(pIdx, cIdx, {
-                                              nombres: isDni ? "" : raw,
-                                              apellidos: isDni ? "" : "",
-                                              dni: isDni ? raw : "",
-                                              parentesco: "APODERADO"
-                                            });
-                                          }}
-                                          className="w-full text-left p-2 mt-1 rounded-lg hover:bg-amber-500/10 text-xs text-amber-600 font-semibold flex items-center gap-1.5 border-t border-border pt-2"
+                                          onClick={() => setActiveSearchKey(null)}
+                                          className="text-[11px] text-muted-foreground hover:text-foreground font-semibold"
                                         >
-                                          <Plus className="w-3.5 h-3.5" /> Asignar "{currentQuery}" manualmente
+                                          Cerrar
                                         </button>
                                       </div>
-                                    </>
+
+                                      {isSearching ? (
+                                        <div className="py-4 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+                                          <Loader2 className="w-4 h-4 animate-spin text-amber-600" /> Buscando apoderados en el padrón...
+                                        </div>
+                                      ) : results.length > 0 ? (
+                                        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                                          {results.map((ap: any) => (
+                                            <div
+                                              key={ap.id}
+                                              className="p-2.5 rounded-lg border border-border/80 bg-background hover:border-amber-500/50 hover:bg-amber-500/5 transition-all flex items-center justify-between gap-3"
+                                            >
+                                              <div className="min-w-0">
+                                                <p className="font-bold text-xs text-foreground truncate">
+                                                  {ap.apellidos}, {ap.nombres}
+                                                </p>
+                                                <div className="flex items-center gap-2 mt-1 text-[11px] text-muted-foreground flex-wrap">
+                                                  <span className="font-mono font-bold text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                                                    DNI: {ap.dni}
+                                                  </span>
+                                                  {ap.parentesco && (
+                                                    <span className="bg-secondary px-1.5 py-0.5 rounded font-medium">
+                                                      {ap.parentesco}
+                                                    </span>
+                                                  )}
+                                                  {ap.nivel && (
+                                                    <span className="capitalize">
+                                                      • {ap.nivel}
+                                                    </span>
+                                                  )}
+                                                  {ap.grado && (
+                                                    <span>
+                                                      • {ap.grado} "{ap.seccion}"
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              </div>
+
+                                              <button
+                                                type="button"
+                                                onClick={() => handleSelectCandidate(pIdx, cIdx, ap)}
+                                                className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition-colors flex items-center gap-1 cursor-pointer"
+                                              >
+                                                <Check className="w-3.5 h-3.5" /> Asignar
+                                              </button>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <div className="py-3 px-2 text-center text-xs text-muted-foreground">
+                                          No se encontraron apoderados que coincidan con "{currentQuery}".
+                                        </div>
+                                      )}
+
+                                      {/* Opción de asignación manual si no figura en el padrón */}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const raw = currentQuery.trim();
+                                          const isDni = /^\d{8}$/.test(raw);
+                                          handleSelectCandidate(pIdx, cIdx, {
+                                            nombres: isDni ? "" : raw,
+                                            apellidos: isDni ? "" : "",
+                                            dni: isDni ? raw : "",
+                                            parentesco: "APODERADO"
+                                          });
+                                        }}
+                                        className="w-full text-left p-2 rounded-lg bg-background hover:bg-amber-500/10 border border-dashed border-border hover:border-amber-500 text-xs text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                                      >
+                                        <Plus className="w-3.5 h-3.5" /> Asignar "{currentQuery}" como {cand.cargo} (manual)
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
                               )}

@@ -186,17 +186,56 @@ export async function getCargosApafaAction() {
 export async function searchApoderadosAction(query: string) {
   try {
     const cleanQuery = query.trim();
-    if (cleanQuery.length < 2) return { data: [] };
+    if (!cleanQuery) return { data: [] };
 
-    const { data, error } = await supabaseAdmin
-      .from("apoderados")
-      .select("id, dni, nombres, apellidos, parentesco, hijos, grado, seccion, nivel")
-      .or(`dni.ilike.%${cleanQuery}%,nombres.ilike.%${cleanQuery}%,apellidos.ilike.%${cleanQuery}%`)
-      .order("apellidos", { ascending: true })
-      .limit(8);
+    // Si es búsqueda numérica (DNI)
+    if (/^\d+$/.test(cleanQuery)) {
+      const { data, error } = await supabaseAdmin
+        .from("apoderados")
+        .select("id, dni, nombres, apellidos, parentesco, hijos, grado, seccion, nivel")
+        .ilike("dni", `%${cleanQuery}%`)
+        .order("apellidos", { ascending: true })
+        .limit(12);
 
-    if (error) throw error;
-    return { data: data || [] };
+      if (error) throw error;
+      return { data: data || [] };
+    }
+
+    // Si son palabras (nombres y/o apellidos)
+    const words = cleanQuery.split(/\s+/).filter(Boolean);
+    if (words.length === 1) {
+      const term = words[0];
+      const { data, error } = await supabaseAdmin
+        .from("apoderados")
+        .select("id, dni, nombres, apellidos, parentesco, hijos, grado, seccion, nivel")
+        .or(`dni.ilike.%${term}%,nombres.ilike.%${term}%,apellidos.ilike.%${term}%`)
+        .order("apellidos", { ascending: true })
+        .limit(12);
+
+      if (error) throw error;
+      return { data: data || [] };
+    } else {
+      // Múltiples palabras: ej "Juan Perez" o "Perez Juan"
+      const orConditions = words.map(w => `nombres.ilike.%${w}%,apellidos.ilike.%${w}%`).join(",");
+      const { data, error } = await supabaseAdmin
+        .from("apoderados")
+        .select("id, dni, nombres, apellidos, parentesco, hijos, grado, seccion, nivel")
+        .or(orConditions)
+        .limit(30);
+
+      if (error) throw error;
+
+      // Ordenar priorizando coincidencias que contengan más palabras buscadas
+      const sorted = (data || []).sort((a: any, b: any) => {
+        const fullA = `${a.apellidos || ""} ${a.nombres || ""} ${a.dni || ""}`.toLowerCase();
+        const fullB = `${b.apellidos || ""} ${b.nombres || ""} ${b.dni || ""}`.toLowerCase();
+        const matchCountA = words.filter(w => fullA.includes(w.toLowerCase())).length;
+        const matchCountB = words.filter(w => fullB.includes(w.toLowerCase())).length;
+        return matchCountB - matchCountA;
+      });
+
+      return { data: sorted.slice(0, 12) };
+    }
   } catch (err: any) {
     return { error: err.message, data: [] };
   }
