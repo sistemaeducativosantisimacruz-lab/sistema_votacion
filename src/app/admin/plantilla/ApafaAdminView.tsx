@@ -456,41 +456,49 @@ export default function ApafaAdminView({
       
       {/* Banner de Elección APAFA Activa */}
       {activeElection?.esta_activa && (
-        <div className="p-4 rounded-2xl bg-amber-500/10 border-2 border-amber-500/40 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4 animate-in slide-in-from-top-2">
+        <div className={`p-4 md:p-5 rounded-2xl border-2 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4 animate-in slide-in-from-top-2 ${
+          activeElection.titulo?.startsWith("[PRUEBA]")
+            ? "bg-amber-100 border-amber-400 dark:bg-amber-950 dark:border-amber-600"
+            : "bg-emerald-100 border-emerald-400 dark:bg-emerald-950 dark:border-emerald-600"
+        }`}>
           <div className="flex items-center gap-3">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+            <span className="relative flex h-3.5 w-3.5 shrink-0">
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                activeElection.titulo?.startsWith("[PRUEBA]") ? "bg-amber-600" : "bg-emerald-600"
+              }`}></span>
+              <span className={`relative inline-flex rounded-full h-3.5 w-3.5 ${
+                activeElection.titulo?.startsWith("[PRUEBA]") ? "bg-amber-700" : "bg-emerald-700"
+              }`}></span>
             </span>
             <div>
-              <p className="font-bold text-amber-900 dark:text-amber-200">
-                Votación de APAFA en Curso: <span className="underline">{activeElection.titulo}</span>
+              <p className="font-extrabold text-slate-950 dark:text-white text-base md:text-lg tracking-tight">
+                Votación de APAFA en Curso: <span className="underline decoration-2">{activeElection.titulo}</span>
               </p>
-              <p className="text-xs text-amber-700/80 dark:text-amber-300/80">
+              <p className="text-xs md:text-sm text-slate-900 dark:text-slate-100 font-semibold mt-0.5">
                 Los padres de familia pueden emitir su voto ingresando su DNI en el portal principal.
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleGenerateMockVotes}
               disabled={isGeneratingMock}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50"
             >
-              <Sparkles className="w-3.5 h-3.5" /> Generar Votos de Prueba
+              <Sparkles className="w-4 h-4" /> Generar Votos de Prueba
             </button>
             <button
               onClick={() => setShowResetConfirm(true)}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-600 text-white hover:bg-orange-700 transition-colors flex items-center gap-1.5 shadow-sm"
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-orange-600 text-white hover:bg-orange-700 transition-colors flex items-center gap-1.5 shadow-sm"
             >
-              <Trash2 className="w-3.5 h-3.5" /> Limpiar Votos
+              <Trash2 className="w-4 h-4" /> Limpiar Votos
             </button>
             <button
               onClick={handleToggleElection}
               disabled={loading}
-              className="px-4 py-1.5 rounded-lg text-xs font-bold bg-red-600 text-white hover:bg-red-700 transition-colors flex items-center gap-1.5 shadow-sm"
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 text-white hover:bg-rose-700 transition-colors flex items-center gap-1.5 shadow-sm"
             >
-              <StopCircle className="w-3.5 h-3.5" /> Detener Votaciones
+              <StopCircle className="w-4 h-4" /> Detener Votaciones
             </button>
           </div>
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2, RefreshCw, AlertCircle, TrendingUp, Users, AlignLeft, BarChart3, Beaker } from "lucide-react";
+import { Loader2, RefreshCw, AlertCircle, TrendingUp, Users, GraduationCap, AlignLeft, BarChart3, Beaker } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 type PartyResult = {
@@ -211,15 +211,15 @@ export default function ResultadosGeneralesPage() {
             <div className="flex bg-secondary/80 p-1 rounded-xl border border-border">
               <button
                 onClick={() => setResultMode("escolar")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${resultMode === "escolar" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${resultMode === "escolar" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
               >
-                🎓 Escolar
+                <GraduationCap className="w-3.5 h-3.5" /> Escolar
               </button>
               <button
                 onClick={() => setResultMode("apafa")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${resultMode === "apafa" ? "bg-amber-600 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${resultMode === "apafa" ? "bg-amber-600 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
               >
-                👨‍👩‍👧‍👦 APAFA
+                <Users className="w-3.5 h-3.5" /> APAFA
               </button>
             </div>
 

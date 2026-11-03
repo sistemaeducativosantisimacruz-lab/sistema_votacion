@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Plus, Users, Image as ImageIcon, Search, Settings, Save, Trash2, FileSpreadsheet, Upload, AlertCircle, CheckCircle2, ShieldCheck, UserX, Archive, Loader2, BarChart2, PlayCircle, StopCircle, Beaker, Camera, Edit, LogOut, Download, Square, X, Eye, EyeOff, UserPlus } from "lucide-react";
+import { Plus, Users, GraduationCap, Image as ImageIcon, Search, Settings, Save, Trash2, FileSpreadsheet, Upload, AlertCircle, CheckCircle2, ShieldCheck, UserX, Archive, Loader2, BarChart2, PlayCircle, StopCircle, Beaker, Camera, Edit, LogOut, Download, Square, X, Eye, EyeOff, UserPlus } from "lucide-react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
@@ -1979,15 +1979,15 @@ export default function AdminDashboard() {
           <div className="flex bg-secondary/80 p-1 rounded-xl border border-border">
             <button
               onClick={() => handleSystemScopeChange("escolar")}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${systemScope === "escolar" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${systemScope === "escolar" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
             >
-              🎓 Escolar
+              <GraduationCap className="w-3.5 h-3.5" /> Escolar
             </button>
             <button
               onClick={() => handleSystemScopeChange("apafa")}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${systemScope === "apafa" ? "bg-amber-600 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${systemScope === "apafa" ? "bg-amber-600 text-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
             >
-              👨‍👩‍👧‍👦 APAFA
+              <Users className="w-3.5 h-3.5" /> APAFA
             </button>
           </div>
         </div>
@@ -2080,7 +2080,7 @@ export default function AdminDashboard() {
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                🎓 Votación Escolar
+                <GraduationCap className="w-4 h-4" /> Votación Escolar
               </button>
               <button
                 onClick={() => handleSystemScopeChange("apafa")}
@@ -2090,7 +2090,7 @@ export default function AdminDashboard() {
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                👨‍👩‍👧‍👦 Votación APAFA
+                <Users className="w-4 h-4" /> Votación APAFA
               </button>
             </div>
           </div>
