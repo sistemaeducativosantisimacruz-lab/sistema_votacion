@@ -18,7 +18,8 @@ import {
   uploadPadronApafaAction,
   getPadronApafaAction,
   getProgresoApafaDataAction,
-  getCargosApafaAction
+  getCargosApafaAction,
+  searchApoderadosAction
 } from "@/app/actions/apafa";
 import { parseApafaWorkbook, parseApafaWorkbooks } from "@/lib/apafaExcelParser";
 
@@ -49,6 +50,12 @@ export default function ApafaAdminView({
   const [parties, setParties] = useState<any[]>([]);
   const [cargos, setCargos] = useState<any[]>([]);
   const [activeElection, setActiveElection] = useState<any>(null);
+
+  // Estados para búsqueda de candidatos por DNI
+  const [searchQueryMap, setSearchQueryMap] = useState<{ [key: string]: string }>({});
+  const [searchResultsMap, setSearchResultsMap] = useState<{ [key: string]: any[] }>({});
+  const [isSearchingMap, setIsSearchingMap] = useState<{ [key: string]: boolean }>({});
+  const [activeSearchKey, setActiveSearchKey] = useState<string | null>(null);
 
   // Padron State
   const [padronData, setPadronData] = useState<any[]>([]);
@@ -99,7 +106,33 @@ export default function ApafaAdminView({
         setFechaVotacion("");
       }
 
-      setParties(res?.parties || []);
+      // Normalizar cada partido a exactamente los 3 roles reglamentarios de APAFA: Presidente, Tesorero, Vocal
+      const targetRoles = ["Presidente", "Tesorero", "Vocal"];
+      const normalizedParties = (res?.parties || []).map((p: any) => {
+        const existingCands = Array.isArray(p.candidatos) ? p.candidatos : [];
+        const candidateMap = new Map<string, any>();
+        for (const c of existingCands) {
+          if (c && c.cargo) candidateMap.set(c.cargo.toLowerCase().trim(), c);
+        }
+
+        const normalizedCandidatos = targetRoles.map(role => {
+          const found = candidateMap.get(role.toLowerCase()) || 
+            existingCands.find((c: any) => c.cargo?.toLowerCase().includes(role.toLowerCase()));
+          return {
+            cargo: role,
+            nombre: found?.nombre || "",
+            dni: found?.dni || "",
+            parentesco: found?.parentesco || ""
+          };
+        });
+
+        return {
+          ...p,
+          candidatos: normalizedCandidatos
+        };
+      });
+
+      setParties(normalizedParties);
       setCargos(res?.cargos || []);
       setActiveElection(res?.activeElection || null);
     } catch (err: any) {
@@ -194,23 +227,14 @@ export default function ApafaAdminView({
     }
   };
 
-  // 4. Agregar y actualizar listas de partidos
+  // 4. Agregar y actualizar listas de partidos con los 3 roles reglamentarios de APAFA
   const handleAddParty = () => {
     const nextNumber = parties.length + 1;
-    const defaultCargosList = cargos.length > 0 ? cargos : [
-      { descripcion: "Presidente(a)" },
-      { descripcion: "Vicepresidente(a)" },
-      { descripcion: "Secretario(a)" },
-      { descripcion: "Tesorero(a)" },
-      { descripcion: "Vocal 1" },
-      { descripcion: "Vocal 2" },
-      { descripcion: "Fiscal / Vigilancia" }
+    const defaultCandidatos = [
+      { cargo: "Presidente", nombre: "", dni: "", parentesco: "" },
+      { cargo: "Tesorero", nombre: "", dni: "", parentesco: "" },
+      { cargo: "Vocal", nombre: "", dni: "", parentesco: "" }
     ];
-    const defaultCandidatos = defaultCargosList.map(c => ({
-      cargo: c.descripcion,
-      nombre: "",
-      dni: ""
-    }));
 
     setParties([
       ...parties,
@@ -223,6 +247,59 @@ export default function ApafaAdminView({
         candidatos: defaultCandidatos
       }
     ]);
+  };
+
+  const handleCandidateSearch = async (partyIdx: number, candIdx: number, query: string) => {
+    const key = `${partyIdx}-${candIdx}`;
+    setSearchQueryMap(prev => ({ ...prev, [key]: query }));
+    setActiveSearchKey(key);
+
+    if (query.trim().length < 2) {
+      setSearchResultsMap(prev => ({ ...prev, [key]: [] }));
+      return;
+    }
+
+    setIsSearchingMap(prev => ({ ...prev, [key]: true }));
+    try {
+      const res = await searchApoderadosAction(query);
+      setSearchResultsMap(prev => ({ ...prev, [key]: res.data || [] }));
+    } catch (err) {
+      console.error("Error searching apoderados:", err);
+    } finally {
+      setIsSearchingMap(prev => ({ ...prev, [key]: false }));
+    }
+  };
+
+  const handleSelectCandidate = (partyIdx: number, candIdx: number, apoderado: any) => {
+    const key = `${partyIdx}-${candIdx}`;
+    const updated = [...parties];
+    const candList = [...(updated[partyIdx].candidatos || [])];
+    candList[candIdx] = {
+      ...candList[candIdx],
+      nombre: apoderado.nombres ? `${apoderado.apellidos}, ${apoderado.nombres}` : apoderado.apellidos,
+      dni: apoderado.dni,
+      parentesco: apoderado.parentesco || "APODERADO"
+    };
+    updated[partyIdx].candidatos = candList;
+    setParties(updated);
+
+    // Limpiar búsqueda
+    setSearchQueryMap(prev => ({ ...prev, [key]: "" }));
+    setSearchResultsMap(prev => ({ ...prev, [key]: [] }));
+    setActiveSearchKey(null);
+  };
+
+  const handleRemoveCandidate = (partyIdx: number, candIdx: number) => {
+    const updated = [...parties];
+    const candList = [...(updated[partyIdx].candidatos || [])];
+    candList[candIdx] = {
+      ...candList[candIdx],
+      nombre: "",
+      dni: "",
+      parentesco: ""
+    };
+    updated[partyIdx].candidatos = candList;
+    setParties(updated);
   };
 
   const handleRemoveParty = async (partyId: string) => {
@@ -776,36 +853,166 @@ export default function ApafaAdminView({
                       </button>
                     </div>
 
-                    {/* Candidatos Directivos de APAFA */}
-                    <div className="mt-4 space-y-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Integrantes del Consejo Directivo</label>
-                      <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                        {(party.candidatos || []).map((cand: any, cIdx: number) => (
-                          <div key={cIdx} className="grid grid-cols-12 gap-2 items-center text-xs bg-secondary/30 p-2 rounded-lg border border-border/50">
-                            <div className="col-span-4 font-bold text-foreground truncate" title={cand.cargo}>
-                              {cand.cargo}
+                    {/* Candidatos Directivos de APAFA (Roles Reglamentarios: Presidente, Tesorero, Vocal) */}
+                    <div className="mt-5 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                          <Users className="w-3.5 h-3.5 text-amber-600" /> Integrantes del Consejo Directivo (3 Cargos)
+                        </label>
+                        <span className="text-[11px] text-muted-foreground font-medium">Búsqueda directa por DNI o Nombres</span>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        {(party.candidatos || []).map((cand: any, cIdx: number) => {
+                          const searchKey = `${pIdx}-${cIdx}`;
+                          const isAssigned = Boolean(cand.nombre || cand.dni);
+                          const currentQuery = searchQueryMap[searchKey] || "";
+                          const isSearching = isSearchingMap[searchKey] || false;
+                          const results = searchResultsMap[searchKey] || [];
+                          const isDropdownOpen = activeSearchKey === searchKey && currentQuery.trim().length >= 2;
+
+                          return (
+                            <div key={cIdx} className="relative">
+                              {isAssigned ? (
+                                <div className="flex items-center justify-between p-2.5 rounded-xl border border-border/80 bg-secondary/40 hover:bg-secondary/60 transition-colors">
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <span className="shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/20">
+                                      {cand.cargo}
+                                    </span>
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-bold text-foreground truncate">
+                                        {cand.nombre}
+                                      </p>
+                                      <div className="flex items-center gap-2 mt-0.5">
+                                        {cand.dni && (
+                                          <span className="text-[11px] font-mono px-1.5 py-0.2 rounded bg-background border border-border text-muted-foreground font-semibold">
+                                            DNI: {cand.dni}
+                                          </span>
+                                        )}
+                                        {cand.parentesco && (
+                                          <span className="text-[11px] text-muted-foreground">
+                                            • {cand.parentesco}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveCandidate(pIdx, cIdx)}
+                                    className="shrink-0 ml-2 px-2.5 py-1 rounded-lg text-xs font-semibold text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-1"
+                                    title="Quitar o cambiar este candidato"
+                                  >
+                                    <X className="w-3.5 h-3.5" /> Cambiar
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="relative">
+                                  <div className="flex items-center gap-2 p-1.5 rounded-xl border border-dashed border-border bg-background focus-within:border-amber-500 transition-colors">
+                                    <span className="shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wide bg-muted text-muted-foreground min-w-[90px] text-center">
+                                      {cand.cargo}
+                                    </span>
+
+                                    <div className="relative flex-1">
+                                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                                      <input
+                                        type="text"
+                                        placeholder={`Buscar ${cand.cargo} por DNI o Nombres...`}
+                                        value={currentQuery}
+                                        onChange={(e) => handleCandidateSearch(pIdx, cIdx, e.target.value)}
+                                        onFocus={() => setActiveSearchKey(searchKey)}
+                                        className="w-full pl-8 pr-7 py-1 text-xs rounded-lg bg-transparent outline-none placeholder:text-muted-foreground/60"
+                                      />
+                                      {isSearching ? (
+                                        <Loader2 className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-amber-600 animate-spin" />
+                                      ) : currentQuery ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setSearchQueryMap(prev => ({ ...prev, [searchKey]: "" }));
+                                            setSearchResultsMap(prev => ({ ...prev, [searchKey]: [] }));
+                                          }}
+                                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  </div>
+
+                                  {/* Dropdown de Búsqueda de Apoderados */}
+                                  {isDropdownOpen && (
+                                    <>
+                                      <div
+                                        className="fixed inset-0 z-40"
+                                        onClick={() => setActiveSearchKey(null)}
+                                      />
+                                      <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-popover border border-border rounded-xl shadow-xl max-h-56 overflow-y-auto p-1.5 animate-in fade-in zoom-in-95">
+                                        {isSearching ? (
+                                          <div className="p-3 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+                                            <Loader2 className="w-4 h-4 animate-spin text-amber-600" /> Buscando en el padrón de padres...
+                                          </div>
+                                        ) : results.length > 0 ? (
+                                          <div className="space-y-1">
+                                            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                                              Apoderados encontrados ({results.length})
+                                            </div>
+                                            {results.map((ap: any) => (
+                                              <button
+                                                key={ap.id}
+                                                type="button"
+                                                onClick={() => handleSelectCandidate(pIdx, cIdx, ap)}
+                                                className="w-full text-left p-2 rounded-lg hover:bg-secondary transition-colors flex items-center justify-between gap-2 group"
+                                              >
+                                                <div className="min-w-0">
+                                                  <p className="font-bold text-xs text-foreground group-hover:text-amber-600 transition-colors truncate">
+                                                    {ap.apellidos}, {ap.nombres}
+                                                  </p>
+                                                  <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5 truncate">
+                                                    <span className="font-mono font-bold text-amber-600">DNI: {ap.dni}</span>
+                                                    {ap.parentesco && <span>• {ap.parentesco}</span>}
+                                                    {ap.nivel && <span className="capitalize">• {ap.nivel}</span>}
+                                                    {ap.grado && <span>{ap.grado} "{ap.seccion}"</span>}
+                                                  </p>
+                                                </div>
+                                                <span className="shrink-0 text-[11px] font-bold text-amber-600 bg-amber-500/10 px-2 py-1 rounded group-hover:bg-amber-600 group-hover:text-white transition-colors">
+                                                  Asignar
+                                                </span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <div className="p-2.5 text-center text-xs text-muted-foreground">
+                                            No se encontraron apoderados que coincidan con "{currentQuery}".
+                                          </div>
+                                        )}
+
+                                        {/* Opción para asignar manualmente si no está en el padrón */}
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const raw = currentQuery.trim();
+                                            const isDni = /^\d{8}$/.test(raw);
+                                            handleSelectCandidate(pIdx, cIdx, {
+                                              nombres: isDni ? "" : raw,
+                                              apellidos: isDni ? "" : "",
+                                              dni: isDni ? raw : "",
+                                              parentesco: "APODERADO"
+                                            });
+                                          }}
+                                          className="w-full text-left p-2 mt-1 rounded-lg hover:bg-amber-500/10 text-xs text-amber-600 font-semibold flex items-center gap-1.5 border-t border-border pt-2"
+                                        >
+                                          <Plus className="w-3.5 h-3.5" /> Asignar "{currentQuery}" manualmente
+                                        </button>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              )}
                             </div>
-                            <div className="col-span-5">
-                              <input
-                                type="text"
-                                placeholder="Apellidos y Nombres"
-                                value={cand.nombre || ""}
-                                onChange={(e) => handleUpdateCandidate(pIdx, cIdx, "nombre", e.target.value)}
-                                className="w-full px-2 py-1 rounded border border-border bg-background text-xs outline-none"
-                              />
-                            </div>
-                            <div className="col-span-3">
-                              <input
-                                type="text"
-                                placeholder="DNI"
-                                maxLength={8}
-                                value={cand.dni || ""}
-                                onChange={(e) => handleUpdateCandidate(pIdx, cIdx, "dni", e.target.value.replace(/\D/g, ""))}
-                                className="w-full px-2 py-1 rounded border border-border bg-background text-xs outline-none font-mono"
-                              />
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   </div>

@@ -136,46 +136,67 @@ export async function submitVoteApafaAction(eleccionId: string, partidoId: strin
 
 export async function getCargosApafaAction() {
   try {
+    const requiredCargos = [
+      { descripcion: "Presidente", orden: 1 },
+      { descripcion: "Tesorero", orden: 2 },
+      { descripcion: "Vocal", orden: 3 }
+    ];
+
     const { data: existing, error } = await supabaseAdmin
       .from("cargos_apafa")
       .select("*")
       .order("orden", { ascending: true });
 
     if (error) {
-      // Fallback si la tabla aún no existe o hay error
       return {
-        data: [
-          { id: "1", descripcion: "Presidente(a)", orden: 1 },
-          { id: "2", descripcion: "Vicepresidente(a)", orden: 2 },
-          { id: "3", descripcion: "Secretario(a)", orden: 3 },
-          { id: "4", descripcion: "Tesorero(a)", orden: 4 },
-          { id: "5", descripcion: "Vocal 1", orden: 5 },
-          { id: "6", descripcion: "Vocal 2", orden: 6 },
-          { id: "7", descripcion: "Fiscal / Vigilancia", orden: 7 }
-        ]
+        data: requiredCargos.map((c, i) => ({ id: String(i + 1), ...c }))
       };
     }
 
-    if (!existing || existing.length === 0) {
-      const defaults = [
-        { descripcion: "Presidente(a)", orden: 1 },
-        { descripcion: "Vicepresidente(a)", orden: 2 },
-        { descripcion: "Secretario(a)", orden: 3 },
-        { descripcion: "Tesorero(a)", orden: 4 },
-        { descripcion: "Vocal 1", orden: 5 },
-        { descripcion: "Vocal 2", orden: 6 },
-        { descripcion: "Fiscal / Vigilancia", orden: 7 }
-      ];
+    const existingNames = (existing || []).map(c => c.descripcion.toLowerCase().trim());
+    const isExact = existing && existing.length === 3 &&
+      existingNames.includes("presidente") &&
+      existingNames.includes("tesorero") &&
+      existingNames.includes("vocal");
+
+    if (!isExact) {
+      await supabaseAdmin.from("cargos_apafa").delete().neq("id", "00000000-0000-0000-0000-000000000000");
       const { data: created } = await supabaseAdmin
         .from("cargos_apafa")
-        .insert(defaults)
-        .select("*");
-      return { data: created || defaults };
+        .insert(requiredCargos)
+        .select("*")
+        .order("orden", { ascending: true });
+      return { data: created || requiredCargos.map((c, i) => ({ id: String(i + 1), ...c })) };
     }
 
     return { data: existing };
   } catch (err: any) {
-    return { error: err.message };
+    return {
+      data: [
+        { id: "1", descripcion: "Presidente", orden: 1 },
+        { id: "2", descripcion: "Tesorero", orden: 2 },
+        { id: "3", descripcion: "Vocal", orden: 3 }
+      ]
+    };
+  }
+}
+
+export async function searchApoderadosAction(query: string) {
+  try {
+    const cleanQuery = query.trim();
+    if (cleanQuery.length < 2) return { data: [] };
+
+    const { data, error } = await supabaseAdmin
+      .from("apoderados")
+      .select("id, dni, nombres, apellidos, parentesco, hijos, grado, seccion, nivel")
+      .or(`dni.ilike.%${cleanQuery}%,nombres.ilike.%${cleanQuery}%,apellidos.ilike.%${cleanQuery}%`)
+      .order("apellidos", { ascending: true })
+      .limit(8);
+
+    if (error) throw error;
+    return { data: data || [] };
+  } catch (err: any) {
+    return { error: err.message, data: [] };
   }
 }
 
