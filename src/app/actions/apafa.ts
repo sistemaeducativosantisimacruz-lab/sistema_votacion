@@ -310,18 +310,44 @@ export async function saveApafaElectionAction(electionData: {
       }
     }
 
-    // Eliminar partidos que ya no están
-    if (currentPartyIds.length > 0) {
-      await supabaseAdmin
+    // Sincronizar y eliminar partidos que ya no están en la lista
+    const { data: existingParties } = await supabaseAdmin
+      .from("partidos_apafa")
+      .select("id")
+      .eq("eleccion_id", electionId);
+
+    const idsToDelete = (existingParties || [])
+      .map(p => p.id)
+      .filter(id => !currentPartyIds.includes(id));
+
+    if (idsToDelete.length > 0) {
+      const { error: delErr } = await supabaseAdmin
         .from("partidos_apafa")
         .delete()
-        .eq("eleccion_id", electionId)
-        .not("id", "in", `(${currentPartyIds.join(",")})`);
+        .in("id", idsToDelete);
+      if (delErr) throw delErr;
     }
 
     return { success: true, electionId };
   } catch (err: any) {
     return { error: err.message };
+  }
+}
+
+export async function deleteApafaPartyAction(partyId: string) {
+  try {
+    await ensureSuperAdmin();
+    if (!partyId || partyId.startsWith("temp-")) {
+      return { success: true };
+    }
+    const { error } = await supabaseAdmin
+      .from("partidos_apafa")
+      .delete()
+      .eq("id", partyId);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { error: err.message || "Error al eliminar la lista de APAFA." };
   }
 }
 

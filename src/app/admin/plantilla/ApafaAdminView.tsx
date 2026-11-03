@@ -11,6 +11,7 @@ import { saveAs } from "file-saver";
 import { 
   getApafaWorkspaceDataAction, 
   saveApafaElectionAction, 
+  deleteApafaPartyAction,
   toggleApafaElectionStatusAction,
   resetApafaVotesAction,
   insertMockVotesApafaAction,
@@ -116,7 +117,7 @@ export default function ApafaAdminView({
     } else if (activeTab === "progreso") {
       loadProgreso();
     }
-  }, [activeTab, workspace]);
+  }, [activeTab, workspace, padronPage, padronNivel]);
 
   // 2. Guardar Plantilla APAFA
   const handleSavePlantilla = async () => {
@@ -196,7 +197,16 @@ export default function ApafaAdminView({
   // 4. Agregar y actualizar listas de partidos
   const handleAddParty = () => {
     const nextNumber = parties.length + 1;
-    const defaultCandidatos = cargos.map(c => ({
+    const defaultCargosList = cargos.length > 0 ? cargos : [
+      { descripcion: "Presidente(a)" },
+      { descripcion: "Vicepresidente(a)" },
+      { descripcion: "Secretario(a)" },
+      { descripcion: "Tesorero(a)" },
+      { descripcion: "Vocal 1" },
+      { descripcion: "Vocal 2" },
+      { descripcion: "Fiscal / Vigilancia" }
+    ];
+    const defaultCandidatos = defaultCargosList.map(c => ({
       cargo: c.descripcion,
       nombre: "",
       dni: ""
@@ -215,8 +225,25 @@ export default function ApafaAdminView({
     ]);
   };
 
-  const handleRemoveParty = (partyId: string) => {
-    setParties(parties.filter(p => p.id !== partyId));
+  const handleRemoveParty = async (partyId: string) => {
+    if (!partyId) return;
+
+    if (!partyId.startsWith("temp-")) {
+      setLoading(true);
+      try {
+        const res = await deleteApafaPartyAction(partyId);
+        if (res?.error) throw new Error(res.error);
+        setMessage({ type: "success", text: "Lista eliminada correctamente de la base de datos." });
+      } catch (err: any) {
+        setMessage({ type: "error", text: `Error al eliminar la lista: ${err.message}` });
+        setLoading(false);
+        return;
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    setParties(prev => prev.filter(p => p.id !== partyId));
   };
 
   const handleUpdateParty = (index: number, field: string, value: any) => {
@@ -376,6 +403,73 @@ export default function ApafaAdminView({
       setMessage({ type: "error", text: err.message });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 7.1. Descargar Formato Modelo de Excel para APAFA
+  const handleDownloadTemplate = async () => {
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const ws = workbook.addWorksheet("1° - A");
+
+      ws.mergeCells("E1:H1");
+      const titleCell = ws.getCell("E1");
+      titleCell.value = "PADRON DE PADRES DE FAMILIA 2026";
+      titleCell.font = { bold: true, size: 14 };
+      titleCell.alignment = { horizontal: "center" };
+
+      ws.mergeCells("E2:H2");
+      const subCell = ws.getCell("E2");
+      subCell.value = "NIVEL: PRIMARIA  1° - A";
+      subCell.font = { bold: true, size: 12 };
+      subCell.alignment = { horizontal: "center" };
+
+      ws.mergeCells("F4:G4");
+      ws.getCell("F4").value = "PADRE";
+      ws.getCell("F4").font = { bold: true };
+      ws.getCell("F4").alignment = { horizontal: "center" };
+
+      ws.mergeCells("H4:I4");
+      ws.getCell("H4").value = "MADRE";
+      ws.getCell("H4").font = { bold: true };
+      ws.getCell("H4").alignment = { horizontal: "center" };
+
+      ws.getCell("J4").value = "HERMANOS EN OTROS GRADOS";
+      ws.getCell("J4").font = { bold: true };
+      ws.getCell("J4").alignment = { horizontal: "center" };
+
+      ws.getRow(5).values = [
+        "ITEM",
+        "DNI",
+        "APELLIDO PATERNO",
+        "APELLIDO MATERNO",
+        "NOMBRES",
+        "APELLIDOS Y NOMBRES",
+        "DNI",
+        "APELLIDOS Y NOMBRES",
+        "DNI",
+        "HERMANOS EN OTROS GRADOS"
+      ];
+      ws.getRow(5).font = { bold: true };
+
+      ws.addRow([
+        1,
+        "81388537",
+        "BARRANZUELA",
+        "PALACIOS",
+        "FERNANDO FABRICIO",
+        "BARRANZUELA MIRANDA CARLOS ALEX",
+        "80537851",
+        "PALACIOS CARHUAPOMA ESTANY",
+        "41523711",
+        "5° A SEC"
+      ]);
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      saveAs(blob, "formato_modelo_padron_apafa.xlsx");
+    } catch (err: any) {
+      console.error("Error generating template:", err);
     }
   };
 
@@ -760,6 +854,14 @@ export default function ApafaAdminView({
                 className="border border-border hover:bg-secondary px-4 py-2.5 rounded-xl font-semibold text-sm flex items-center gap-2 transition-all"
               >
                 <Download className="w-4 h-4" /> Descargar Padrón
+              </button>
+              <button
+                onClick={handleDownloadTemplate}
+                type="button"
+                className="border border-border hover:bg-secondary px-4 py-2.5 rounded-xl font-semibold text-sm flex items-center gap-2 transition-all text-amber-700 dark:text-amber-400"
+                title="Descarga el formato modelo para llenar los padrones de primaria y secundaria"
+              >
+                <FileSpreadsheet className="w-4 h-4" /> Formato Modelo
               </button>
             </div>
           </div>
