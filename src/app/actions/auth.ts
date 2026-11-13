@@ -27,6 +27,7 @@ export async function loginVoterAction(dni: string) {
       grado: data.grado,
       seccion: data.seccion,
       nivel: data.nivel,
+      tipo: "estudiante",
     });
 
     return { success: true };

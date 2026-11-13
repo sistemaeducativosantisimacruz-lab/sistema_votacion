@@ -7,8 +7,8 @@ export async function submitVoteAction(eleccionId: string, partidoId: string | n
   try {
     const user = await getVoterSession();
 
-    if (!user) {
-      return { error: "Sesión de votante inválida o expirada." };
+    if (!user || user.tipo === "apoderado") {
+      return { error: "Sesión de votante escolar inválida o expirada." };
     }
 
     // Doble verificación: comprobar en BD si ya votó antes de hacer nada (para evitar race conditions)
