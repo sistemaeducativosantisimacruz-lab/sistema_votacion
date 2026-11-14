@@ -280,32 +280,36 @@ function parseFullNames(fullName: string) {
 }
 
 async function ensureCandidateInPadron(cand: { dni?: string; nombre?: string; cargo?: string; parentesco?: string }) {
-  if (!cand || !cand.dni) return;
-  const cleanDni = cand.dni.replace(/\D/g, "").slice(0, 8);
-  if (cleanDni.length !== 8) return;
+  try {
+    if (!cand || !cand.dni) return;
+    const cleanDni = cand.dni.replace(/\D/g, "").slice(0, 8);
+    if (cleanDni.length !== 8) return;
 
-  const { data: existing } = await supabaseAdmin
-    .from("apoderados")
-    .select("id")
-    .eq("dni", cleanDni)
-    .maybeSingle();
+    const { data: existing } = await supabaseAdmin
+      .from("apoderados")
+      .select("id")
+      .eq("dni", cleanDni)
+      .maybeSingle();
 
-  if (!existing) {
-    const { nombres, apellidos } = parseFullNames(cand.nombre || "");
-    const cargoNote = cand.cargo ? `Directivo APAFA (${cand.cargo})` : "Directivo APAFA";
+    if (!existing) {
+      const { nombres, apellidos } = parseFullNames(cand.nombre || "");
+      const cargoNote = cand.cargo ? `Directivo APAFA (${cand.cargo})` : "Directivo APAFA";
 
-    await supabaseAdmin.from("apoderados").insert({
-      dni: cleanDni,
-      nombres: nombres || "Apoderado",
-      apellidos: apellidos || "Directivo",
-      parentesco: cand.parentesco || "APODERADO",
-      familia_id: `FAM-${cleanDni}`,
-      hijos: cargoNote,
-      nivel: "general",
-      grado: "Directiva",
-      seccion: "-",
-      ya_voto: false
-    });
+      await supabaseAdmin.from("apoderados").insert({
+        dni: cleanDni,
+        nombres: nombres || "Apoderado",
+        apellidos: apellidos || "Directivo",
+        parentesco: cand.parentesco || "APODERADO",
+        familia_id: `FAM-${cleanDni}`,
+        hijos: cargoNote,
+        nivel: "general",
+        grado: "Directiva",
+        seccion: "-",
+        ya_voto: false
+      });
+    }
+  } catch (err: any) {
+    console.warn("Aviso en ensureCandidateInPadron:", err?.message || err);
   }
 }
 

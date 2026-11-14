@@ -120,27 +120,35 @@ export default function ApafaAdminView({
         const existingCands = Array.isArray(p.candidatos) ? p.candidatos : [];
         const candidateMap = new Map<string, any>();
         for (const c of existingCands) {
-          if (c && c.cargo) candidateMap.set(c.cargo.toLowerCase().trim(), c);
+          if (c && c.cargo) {
+            const key = c.cargo.toLowerCase().trim();
+            const prev = candidateMap.get(key);
+            if (!prev || (!prev.nombre && Boolean(c.nombre || c.dni))) {
+              candidateMap.set(key, c);
+            }
+          }
         }
 
         const normalizedCandidatos = targetRoles.map(role => {
           let found = candidateMap.get(role.toLowerCase());
-          if (!found) {
+          if (!found || !found.nombre) {
+            let altFound: any = null;
             if (role === "Presidente") {
-              found = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("presiden") && !c.cargo?.toLowerCase().includes("vice"));
+              altFound = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("presiden") && !c.cargo?.toLowerCase().includes("vice") && Boolean(c.nombre));
             } else if (role === "Vicepresidente") {
-              found = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("vice"));
+              altFound = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("vice") && Boolean(c.nombre));
             } else if (role === "Tesorero(a)") {
-              found = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("tesorer"));
+              altFound = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("tesorer") && Boolean(c.nombre));
             } else if (role === "Secretario(a)") {
-              found = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("secretar"));
+              altFound = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("secretar") && Boolean(c.nombre));
             } else if (role === "Vocal 1") {
-              found = existingCands.find((c: any) => c.cargo?.toLowerCase() === "vocal 1" || c.cargo?.toLowerCase() === "vocal");
+              altFound = existingCands.find((c: any) => (c.cargo?.toLowerCase() === "vocal 1" || c.cargo?.toLowerCase() === "vocal") && Boolean(c.nombre));
             } else if (role === "Vocal 2") {
-              found = existingCands.find((c: any) => c.cargo?.toLowerCase() === "vocal 2");
+              altFound = existingCands.find((c: any) => c.cargo?.toLowerCase() === "vocal 2" && Boolean(c.nombre));
             } else if (role === "Vocal 3") {
-              found = existingCands.find((c: any) => c.cargo?.toLowerCase() === "vocal 3");
+              altFound = existingCands.find((c: any) => c.cargo?.toLowerCase() === "vocal 3" && Boolean(c.nombre));
             }
+            if (altFound) found = altFound;
           }
 
           return {
@@ -382,27 +390,94 @@ export default function ApafaAdminView({
         }
       }
 
-      handleSelectCandidate(pIdx, cIdx, {
-        nombres: form.nombres.trim(),
+      // 1. Actualizar estado local inmediatamente
+      const updated = [...parties];
+      const party = updated[pIdx];
+      if (!party) return;
+
+      const candList = [...(party.candidatos || [])];
+      const finalNombre = form.nombres.trim();
+
+      candList[cIdx] = {
+        cargo: candCargo,
+        nombre: finalNombre,
         dni: cleanDni,
         parentesco: form.parentesco || "APODERADO"
+      };
+
+      const updatedParty = {
+        ...party,
+        candidatos: candList
+      };
+      updated[pIdx] = updatedParty;
+      setParties(updated);
+
+      // Limpiar formulario y modo manual
+      setSearchQueryMap(prev => ({ ...prev, [key]: "" }));
+      setSearchResultsMap(prev => ({ ...prev, [key]: [] }));
+      setActiveSearchKey(null);
+      setManualCandidateForm(prev => {
+        const copy = { ...prev };
+        delete copy[key];
+        return copy;
       });
+
+      // 2. Guardar DIRECTAMENTE en la base de datos (partidos_apafa) para persistir al actualizar
+      const saveRes = await saveSingleApafaPartyAction({
+        electionId: electionId || undefined,
+        electionTitle: titulo || (workspace === "simulacro" ? "[PRUEBA] Elecciones APAFA 2026" : "Elecciones APAFA 2026"),
+        fechaVotacion: fechaVotacion || undefined,
+        isSimulacro: workspace === "simulacro",
+        party: {
+          id: updatedParty.id,
+          nombre: updatedParty.nombre?.trim() || `Lista ${updatedParty.numero_lista || pIdx + 1}`,
+          numero_lista: String(updatedParty.numero_lista || pIdx + 1),
+          logo_url: updatedParty.logo_url || "",
+          color: updatedParty.color || "#d97706",
+          candidatos: candList
+        }
+      });
+
+      if (saveRes.error) {
+        console.error("Error al persistir lista en BD:", saveRes.error);
+        setMessage({ type: "error", text: `Error al guardar en base de datos: ${saveRes.error}` });
+      } else {
+        if (saveRes.electionId && !electionId) {
+          setElectionId(saveRes.electionId);
+        }
+        if (saveRes.party) {
+          setParties(prev => {
+            const next = [...prev];
+            if (next[pIdx]) {
+              next[pIdx] = {
+                ...next[pIdx],
+                id: saveRes.party.id,
+                candidatos: candList
+              };
+            }
+            return next;
+          });
+        }
+        setMessage({
+          type: "success",
+          text: `¡${candCargo} (${finalNombre}) guardado correctamente en la base de datos!`
+        });
+      }
     } catch (err: any) {
       console.error("Error al registrar candidato manual:", err);
-      handleSelectCandidate(pIdx, cIdx, {
-        nombres: form.nombres.trim(),
-        dni: cleanDni,
-        parentesco: "APODERADO"
-      });
+      setMessage({ type: "error", text: `Error al registrar candidato: ${err.message}` });
     } finally {
       setSavingManualCandidateKey(null);
     }
   };
 
-  const handleSelectCandidate = (partyIdx: number, candIdx: number, apoderado: any) => {
+  const handleSelectCandidate = async (partyIdx: number, candIdx: number, apoderado: any) => {
     const key = `${partyIdx}-${candIdx}`;
     const updated = [...parties];
-    const candList = [...(updated[partyIdx].candidatos || [])];
+    const party = updated[partyIdx];
+    if (!party) return;
+
+    const candList = [...(party.candidatos || [])];
     
     let finalNombre = "";
     if (apoderado.apellidos && apoderado.nombres) {
@@ -411,13 +486,21 @@ export default function ApafaAdminView({
       finalNombre = apoderado.nombres || apoderado.nombre || apoderado.apellidos || "";
     }
 
+    const candCargo = candList[candIdx]?.cargo || "Integrante";
+
     candList[candIdx] = {
       ...candList[candIdx],
+      cargo: candCargo,
       nombre: finalNombre,
       dni: apoderado.dni || "",
       parentesco: apoderado.parentesco || "APODERADO"
     };
-    updated[partyIdx].candidatos = candList;
+
+    const updatedParty = {
+      ...party,
+      candidatos: candList
+    };
+    updated[partyIdx] = updatedParty;
     setParties(updated);
 
     // Limpiar búsqueda y modo manual
@@ -429,26 +512,101 @@ export default function ApafaAdminView({
       delete copy[key];
       return copy;
     });
+
+    // Guardar DIRECTAMENTE en la base de datos (partidos_apafa) para que persista al refrescar
+    try {
+      const saveRes = await saveSingleApafaPartyAction({
+        electionId: electionId || undefined,
+        electionTitle: titulo || (workspace === "simulacro" ? "[PRUEBA] Elecciones APAFA 2026" : "Elecciones APAFA 2026"),
+        fechaVotacion: fechaVotacion || undefined,
+        isSimulacro: workspace === "simulacro",
+        party: {
+          id: updatedParty.id,
+          nombre: updatedParty.nombre?.trim() || `Lista ${updatedParty.numero_lista || partyIdx + 1}`,
+          numero_lista: String(updatedParty.numero_lista || partyIdx + 1),
+          logo_url: updatedParty.logo_url || "",
+          color: updatedParty.color || "#d97706",
+          candidatos: candList
+        }
+      });
+
+      if (saveRes.electionId && !electionId) {
+        setElectionId(saveRes.electionId);
+      }
+      if (saveRes.party) {
+        setParties(prev => {
+          const next = [...prev];
+          if (next[partyIdx]) {
+            next[partyIdx] = {
+              ...next[partyIdx],
+              id: saveRes.party.id,
+              candidatos: candList
+            };
+          }
+          return next;
+        });
+      }
+      setMessage({
+        type: "success",
+        text: `¡${candCargo} (${finalNombre}) asignado y guardado en la base de datos!`
+      });
+    } catch (e: any) {
+      console.warn("Aviso al auto-guardar integrante en BD:", e);
+    }
   };
 
-  const handleRemoveCandidate = (partyIdx: number, candIdx: number) => {
+  const handleRemoveCandidate = async (partyIdx: number, candIdx: number) => {
     const key = `${partyIdx}-${candIdx}`;
     const updated = [...parties];
-    const candList = [...(updated[partyIdx].candidatos || [])];
+    const party = updated[partyIdx];
+    if (!party) return;
+
+    const candList = [...(party.candidatos || [])];
+    const removedCargo = candList[candIdx]?.cargo || "Integrante";
+
     candList[candIdx] = {
       ...candList[candIdx],
       nombre: "",
       dni: "",
       parentesco: ""
     };
-    updated[partyIdx].candidatos = candList;
+
+    const updatedParty = {
+      ...party,
+      candidatos: candList
+    };
+    updated[partyIdx] = updatedParty;
     setParties(updated);
+
     setManualCandidateForm(prev => {
       const copy = { ...prev };
       delete copy[key];
       return copy;
     });
-    setActiveSearchKey(key);
+
+    // Guardar la remoción en la base de datos
+    try {
+      await saveSingleApafaPartyAction({
+        electionId: electionId || undefined,
+        electionTitle: titulo || (workspace === "simulacro" ? "[PRUEBA] Elecciones APAFA 2026" : "Elecciones APAFA 2026"),
+        fechaVotacion: fechaVotacion || undefined,
+        isSimulacro: workspace === "simulacro",
+        party: {
+          id: updatedParty.id,
+          nombre: updatedParty.nombre?.trim() || `Lista ${updatedParty.numero_lista || partyIdx + 1}`,
+          numero_lista: String(updatedParty.numero_lista || partyIdx + 1),
+          logo_url: updatedParty.logo_url || "",
+          color: updatedParty.color || "#d97706",
+          candidatos: candList
+        }
+      });
+      setMessage({
+        type: "success",
+        text: `${removedCargo} removido y actualizado en la base de datos.`
+      });
+    } catch (e: any) {
+      console.warn("Aviso al auto-guardar remoción en BD:", e);
+    }
   };
 
   const handleRemoveParty = async (partyId: string) => {
@@ -508,7 +666,7 @@ export default function ApafaAdminView({
           nombre: res.party.nombre,
           numero_lista: res.party.numero_lista,
           logo_url: res.party.logo_url || "",
-          candidatos: res.party.candidatos || updated[pIdx].candidatos
+          candidatos: (res.party.candidatos && res.party.candidatos.length > 0) ? res.party.candidatos : updated[pIdx].candidatos
         };
         setParties(updated);
       }
