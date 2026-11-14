@@ -1281,10 +1281,10 @@ export default function ApafaAdminView({
                                     <button
                                       type="button"
                                       onClick={() => handleOpenManualEntry(pIdx, cIdx, cand.nombre, cand.dni)}
-                                      className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700 transition-colors flex items-center gap-1 cursor-pointer shadow-sm"
+                                      className="px-3.5 py-1.5 rounded-lg text-xs font-black text-black dark:text-white bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border-2 border-slate-900 dark:border-white transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
                                       title="Editar nombres o DNI"
                                     >
-                                      <Edit className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300" /> Editar
+                                      <Edit className="w-3.5 h-3.5 text-black dark:text-white stroke-[2.5]" /> Editar
                                     </button>
 
                                     <button
@@ -1339,10 +1339,10 @@ export default function ApafaAdminView({
                                     <button
                                       type="button"
                                       onClick={() => handleOpenManualEntry(pIdx, cIdx, currentQuery)}
-                                      className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-800 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer shadow-sm"
+                                      className="px-3.5 py-1.5 rounded-lg text-xs font-black text-black dark:text-white bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border-2 border-slate-900 dark:border-white transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-sm"
                                       title="Ingresar nombres y DNI manualmente"
                                     >
-                                      <UserPlus className="w-3.5 h-3.5 text-slate-700 dark:text-slate-200" /> Manual
+                                      <UserPlus className="w-3.5 h-3.5 text-black dark:text-white stroke-[2.5]" /> Manual
                                     </button>
                                   </div>
 
