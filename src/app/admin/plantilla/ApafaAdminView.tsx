@@ -5,7 +5,7 @@ import {
   Users, Plus, Trash2, Save, FileSpreadsheet, Upload, AlertCircle, 
   CheckCircle2, PlayCircle, StopCircle, RefreshCw, Download, 
   Search, BarChart2, Beaker, Check, X, Loader2, Sparkles,
-  Camera, Image as ImageIcon
+  Camera, Image as ImageIcon, Edit, UserPlus
 } from "lucide-react";
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
@@ -59,6 +59,7 @@ export default function ApafaAdminView({
   const [searchResultsMap, setSearchResultsMap] = useState<{ [key: string]: any[] }>({});
   const [isSearchingMap, setIsSearchingMap] = useState<{ [key: string]: boolean }>({});
   const [activeSearchKey, setActiveSearchKey] = useState<string | null>(null);
+  const [manualCandidateForm, setManualCandidateForm] = useState<{ [key: string]: { nombres: string; dni: string; parentesco: string } }>({});
   const [savingPartyIdx, setSavingPartyIdx] = useState<number | null>(null);
   const [savedPartyIdx, setSavedPartyIdx] = useState<number | null>(null);
 
@@ -336,23 +337,52 @@ export default function ApafaAdminView({
     }
   };
 
+  const handleOpenManualEntry = (partyIdx: number, candIdx: number, initialQuery: string = "", initialDni: string = "") => {
+    const key = `${partyIdx}-${candIdx}`;
+    const raw = initialQuery.trim();
+    const isDigits = /^\d+$/.test(raw);
+    
+    setManualCandidateForm(prev => ({
+      ...prev,
+      [key]: {
+        nombres: isDigits ? "" : raw,
+        dni: initialDni ? initialDni : (isDigits ? raw.slice(0, 8) : ""),
+        parentesco: "APODERADO"
+      }
+    }));
+    setActiveSearchKey(null);
+  };
+
   const handleSelectCandidate = (partyIdx: number, candIdx: number, apoderado: any) => {
     const key = `${partyIdx}-${candIdx}`;
     const updated = [...parties];
     const candList = [...(updated[partyIdx].candidatos || [])];
+    
+    let finalNombre = "";
+    if (apoderado.apellidos && apoderado.nombres) {
+      finalNombre = `${apoderado.apellidos}, ${apoderado.nombres}`;
+    } else {
+      finalNombre = apoderado.nombres || apoderado.nombre || apoderado.apellidos || "";
+    }
+
     candList[candIdx] = {
       ...candList[candIdx],
-      nombre: apoderado.nombres ? `${apoderado.apellidos}, ${apoderado.nombres}` : (apoderado.apellidos || apoderado.nombre || ""),
+      nombre: finalNombre,
       dni: apoderado.dni || "",
       parentesco: apoderado.parentesco || "APODERADO"
     };
     updated[partyIdx].candidatos = candList;
     setParties(updated);
 
-    // Limpiar búsqueda
+    // Limpiar búsqueda y modo manual
     setSearchQueryMap(prev => ({ ...prev, [key]: "" }));
     setSearchResultsMap(prev => ({ ...prev, [key]: [] }));
     setActiveSearchKey(null);
+    setManualCandidateForm(prev => {
+      const copy = { ...prev };
+      delete copy[key];
+      return copy;
+    });
   };
 
   const handleRemoveCandidate = (partyIdx: number, candIdx: number) => {
@@ -367,6 +397,11 @@ export default function ApafaAdminView({
     };
     updated[partyIdx].candidatos = candList;
     setParties(updated);
+    setManualCandidateForm(prev => {
+      const copy = { ...prev };
+      delete copy[key];
+      return copy;
+    });
     setActiveSearchKey(key);
   };
 
@@ -1078,10 +1113,98 @@ export default function ApafaAdminView({
                           const isSearching = isSearchingMap[searchKey] || false;
                           const results = searchResultsMap[searchKey] || [];
                           const hasSearchActive = activeSearchKey === searchKey && currentQuery.trim().length >= 1;
+                          const isManualOpen = Boolean(manualCandidateForm[searchKey]);
+                          const manualForm = manualCandidateForm[searchKey] || { nombres: "", dni: "", parentesco: "APODERADO" };
 
                           return (
                             <div key={cIdx} className="rounded-xl border border-border bg-card p-3 space-y-2 transition-all">
-                              {isAssigned ? (
+                              {isManualOpen ? (
+                                <div className="rounded-xl border border-amber-500/50 bg-amber-500/5 p-3 space-y-3 animate-in fade-in">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <span className="shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wide bg-amber-500 text-white shadow-sm">
+                                        {cand.cargo} (Ingreso Manual)
+                                      </span>
+                                      <span className="text-xs text-muted-foreground font-medium">
+                                        Completa los datos del integrante:
+                                      </span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => setManualCandidateForm(prev => { const copy = { ...prev }; delete copy[searchKey]; return copy; })}
+                                      className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                                      title="Cancelar ingreso manual"
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                      <label className="text-xs font-bold text-foreground block mb-1">
+                                        Apellidos y Nombres <span className="text-destructive">*</span>
+                                      </label>
+                                      <input
+                                        type="text"
+                                        placeholder="Ej. Pérez García, Juan Carlos"
+                                        value={manualForm.nombres}
+                                        onChange={(e) => setManualCandidateForm(prev => ({
+                                          ...prev,
+                                          [searchKey]: { ...prev[searchKey], nombres: e.target.value }
+                                        }))}
+                                        className="w-full px-3 py-2 text-xs rounded-lg border border-border bg-background text-foreground focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
+                                        autoFocus
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="text-xs font-bold text-foreground block mb-1">
+                                        DNI (8 dígitos)
+                                      </label>
+                                      <input
+                                        type="text"
+                                        placeholder="8 dígitos numéricos"
+                                        maxLength={8}
+                                        value={manualForm.dni}
+                                        onChange={(e) => setManualCandidateForm(prev => ({
+                                          ...prev,
+                                          [searchKey]: { ...prev[searchKey], dni: e.target.value.replace(/\D/g, '').slice(0, 8) }
+                                        }))}
+                                        className="w-full px-3 py-2 text-xs rounded-lg border border-border bg-background text-foreground focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none font-mono"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
+                                    <span className="text-[11px] text-muted-foreground italic">
+                                      * Escribe los datos directamente si no figura en el padrón electoral.
+                                    </span>
+                                    <div className="flex gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => setManualCandidateForm(prev => { const copy = { ...prev }; delete copy[searchKey]; return copy; })}
+                                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-secondary border border-border transition-colors cursor-pointer"
+                                      >
+                                        Cancelar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={!manualForm.nombres.trim()}
+                                        onClick={() => {
+                                          handleSelectCandidate(pIdx, cIdx, {
+                                            nombres: manualForm.nombres.trim(),
+                                            dni: manualForm.dni.trim(),
+                                            parentesco: "APODERADO"
+                                          });
+                                        }}
+                                        className="px-4 py-1.5 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition-all disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                                      >
+                                        <Check className="w-3.5 h-3.5" /> Asignar como {cand.cargo}
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : isAssigned ? (
                                 <div className="flex items-center justify-between gap-3">
                                   <div className="flex items-center gap-3 min-w-0">
                                     <span className="shrink-0 px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
@@ -1106,14 +1229,25 @@ export default function ApafaAdminView({
                                     </div>
                                   </div>
 
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveCandidate(pIdx, cIdx)}
-                                    className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold text-muted-foreground hover:text-destructive hover:bg-destructive/10 border border-border hover:border-destructive/30 transition-colors flex items-center gap-1.5 cursor-pointer"
-                                    title="Cambiar este candidato"
-                                  >
-                                    <X className="w-3.5 h-3.5" /> Cambiar
-                                  </button>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenManualEntry(pIdx, cIdx, cand.nombre, cand.dni)}
+                                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-muted-foreground hover:text-amber-600 hover:bg-amber-500/10 border border-border hover:border-amber-500/30 transition-colors flex items-center gap-1 cursor-pointer"
+                                      title="Editar nombres o DNI"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" /> Editar
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveCandidate(pIdx, cIdx)}
+                                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-muted-foreground hover:text-destructive hover:bg-destructive/10 border border-border hover:border-destructive/30 transition-colors flex items-center gap-1 cursor-pointer"
+                                      title="Quitar este candidato"
+                                    >
+                                      <X className="w-3.5 h-3.5" /> Quitar
+                                    </button>
+                                  </div>
                                 </div>
                               ) : (
                                 <div className="space-y-2">
@@ -1153,6 +1287,15 @@ export default function ApafaAdminView({
                                         </button>
                                       ) : null}
                                     </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenManualEntry(pIdx, cIdx, currentQuery)}
+                                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-muted-foreground hover:text-amber-600 hover:bg-amber-500/10 border border-border hover:border-amber-500/30 transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                                      title="Ingresar nombres y DNI manualmente"
+                                    >
+                                      <UserPlus className="w-3.5 h-3.5" /> Manual
+                                    </button>
                                   </div>
 
                                   {/* Panel de Resultados IN-FLOW (Empuja hacia abajo, NO se sobrepone jamás) */}
@@ -1224,22 +1367,21 @@ export default function ApafaAdminView({
                                         </div>
                                       )}
 
-                                      {/* Opción de asignación manual si no figura en el padrón */}
+                                      {/* Opción de asignación manual con apertura de campos */}
                                       <button
                                         type="button"
-                                        onClick={() => {
-                                          const raw = currentQuery.trim();
-                                          const isDni = /^\d{8}$/.test(raw);
-                                          handleSelectCandidate(pIdx, cIdx, {
-                                            nombres: isDni ? "" : raw,
-                                            apellidos: isDni ? "" : "",
-                                            dni: isDni ? raw : "",
-                                            parentesco: "APODERADO"
-                                          });
-                                        }}
-                                        className="w-full text-left p-2 rounded-lg bg-background hover:bg-amber-500/10 border border-dashed border-border hover:border-amber-500 text-xs text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                                        onClick={() => handleOpenManualEntry(pIdx, cIdx, currentQuery)}
+                                        className="w-full text-left p-2.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-dashed border-amber-500/40 hover:border-amber-500 text-xs text-amber-700 dark:text-amber-300 font-bold flex items-center justify-between gap-2 transition-all cursor-pointer"
                                       >
-                                        <Plus className="w-3.5 h-3.5" /> Asignar "{currentQuery}" como {cand.cargo} (manual)
+                                        <span className="flex items-center gap-1.5 truncate">
+                                          <Plus className="w-4 h-4 text-amber-600 shrink-0" />
+                                          {currentQuery.trim() ? (
+                                            <span>Asignar <strong>"{currentQuery}"</strong> como {cand.cargo} (manual)</span>
+                                          ) : (
+                                            <span>Escribir datos manualmente para {cand.cargo}</span>
+                                          )}
+                                        </span>
+                                        <span className="text-[11px] underline shrink-0 font-semibold">Abrir campos para escribir</span>
                                       </button>
                                     </div>
                                   )}
