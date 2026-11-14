@@ -111,8 +111,8 @@ export default function ApafaAdminView({
         setFechaVotacion("");
       }
 
-      // Normalizar cada partido a los 5 roles de APAFA: Presidente, Tesorero(a), Secretario(a), Vocal 1, Vocal 2
-      const targetRoles = ["Presidente", "Tesorero(a)", "Secretario(a)", "Vocal 1", "Vocal 2"];
+      // Normalizar cada partido a los 7 roles de APAFA: Presidente, Vicepresidente, Tesorero(a), Secretario(a), Vocal 1, Vocal 2, Vocal 3
+      const targetRoles = ["Presidente", "Vicepresidente", "Tesorero(a)", "Secretario(a)", "Vocal 1", "Vocal 2", "Vocal 3"];
       const normalizedParties = (res?.parties || []).map((p: any) => {
         const existingCands = Array.isArray(p.candidatos) ? p.candidatos : [];
         const candidateMap = new Map<string, any>();
@@ -124,7 +124,9 @@ export default function ApafaAdminView({
           let found = candidateMap.get(role.toLowerCase());
           if (!found) {
             if (role === "Presidente") {
-              found = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("presiden"));
+              found = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("presiden") && !c.cargo?.toLowerCase().includes("vice"));
+            } else if (role === "Vicepresidente") {
+              found = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("vice"));
             } else if (role === "Tesorero(a)") {
               found = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("tesorer"));
             } else if (role === "Secretario(a)") {
@@ -133,6 +135,8 @@ export default function ApafaAdminView({
               found = existingCands.find((c: any) => c.cargo?.toLowerCase() === "vocal 1" || c.cargo?.toLowerCase() === "vocal");
             } else if (role === "Vocal 2") {
               found = existingCands.find((c: any) => c.cargo?.toLowerCase() === "vocal 2");
+            } else if (role === "Vocal 3") {
+              found = existingCands.find((c: any) => c.cargo?.toLowerCase() === "vocal 3");
             }
           }
 
@@ -245,15 +249,17 @@ export default function ApafaAdminView({
     }
   };
 
-  // 4. Agregar y actualizar listas de partidos con los 5 roles de APAFA: Presidente, Tesorero(a), Secretario(a), Vocal 1, Vocal 2
+  // 4. Agregar y actualizar listas de partidos con los 7 roles de APAFA: Presidente, Vicepresidente, Tesorero(a), Secretario(a), Vocal 1, Vocal 2, Vocal 3
   const handleAddParty = () => {
     const nextNumber = parties.length + 1;
     const defaultCandidatos = [
       { cargo: "Presidente", nombre: "", dni: "", parentesco: "" },
+      { cargo: "Vicepresidente", nombre: "", dni: "", parentesco: "" },
       { cargo: "Tesorero(a)", nombre: "", dni: "", parentesco: "" },
       { cargo: "Secretario(a)", nombre: "", dni: "", parentesco: "" },
       { cargo: "Vocal 1", nombre: "", dni: "", parentesco: "" },
-      { cargo: "Vocal 2", nombre: "", dni: "", parentesco: "" }
+      { cargo: "Vocal 2", nombre: "", dni: "", parentesco: "" },
+      { cargo: "Vocal 3", nombre: "", dni: "", parentesco: "" }
     ];
 
     setParties([
@@ -1055,11 +1061,11 @@ export default function ApafaAdminView({
                       </div>
                     </div>
 
-                    {/* Candidatos Directivos de APAFA (Presidente, Tesorero(a), Secretario(a), Vocal 1, Vocal 2) */}
+                    {/* Candidatos Directivos de APAFA (Presidente, Vicepresidente, Tesorero(a), Secretario(a), Vocal 1, Vocal 2, Vocal 3) */}
                     <div className="mt-5 space-y-3">
                       <div className="flex items-center justify-between">
                         <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                          <Users className="w-3.5 h-3.5 text-amber-600" /> Integrantes del Consejo Directivo (5 Cargos)
+                          <Users className="w-3.5 h-3.5 text-amber-600" /> Integrantes del Consejo Directivo (7 Cargos)
                         </label>
                         <span className="text-[11px] text-muted-foreground font-medium">Búsqueda directa por DNI o Nombres</span>
                       </div>
