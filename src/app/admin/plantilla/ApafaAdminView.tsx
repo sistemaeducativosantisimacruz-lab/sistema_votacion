@@ -111,8 +111,8 @@ export default function ApafaAdminView({
         setFechaVotacion("");
       }
 
-      // Normalizar cada partido a exactamente los 3 roles reglamentarios de APAFA: Presidente, Tesorero, Vocal
-      const targetRoles = ["Presidente", "Tesorero", "Vocal"];
+      // Normalizar cada partido a los 5 roles de APAFA: Presidente, Tesorero(a), Secretario(a), Vocal 1, Vocal 2
+      const targetRoles = ["Presidente", "Tesorero(a)", "Secretario(a)", "Vocal 1", "Vocal 2"];
       const normalizedParties = (res?.parties || []).map((p: any) => {
         const existingCands = Array.isArray(p.candidatos) ? p.candidatos : [];
         const candidateMap = new Map<string, any>();
@@ -121,8 +121,21 @@ export default function ApafaAdminView({
         }
 
         const normalizedCandidatos = targetRoles.map(role => {
-          const found = candidateMap.get(role.toLowerCase()) || 
-            existingCands.find((c: any) => c.cargo?.toLowerCase().includes(role.toLowerCase()));
+          let found = candidateMap.get(role.toLowerCase());
+          if (!found) {
+            if (role === "Presidente") {
+              found = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("presiden"));
+            } else if (role === "Tesorero(a)") {
+              found = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("tesorer"));
+            } else if (role === "Secretario(a)") {
+              found = existingCands.find((c: any) => c.cargo?.toLowerCase().includes("secretar"));
+            } else if (role === "Vocal 1") {
+              found = existingCands.find((c: any) => c.cargo?.toLowerCase() === "vocal 1" || c.cargo?.toLowerCase() === "vocal");
+            } else if (role === "Vocal 2") {
+              found = existingCands.find((c: any) => c.cargo?.toLowerCase() === "vocal 2");
+            }
+          }
+
           return {
             cargo: role,
             nombre: found?.nombre || "",
@@ -232,13 +245,15 @@ export default function ApafaAdminView({
     }
   };
 
-  // 4. Agregar y actualizar listas de partidos con los 3 roles reglamentarios de APAFA
+  // 4. Agregar y actualizar listas de partidos con los 5 roles de APAFA: Presidente, Tesorero(a), Secretario(a), Vocal 1, Vocal 2
   const handleAddParty = () => {
     const nextNumber = parties.length + 1;
     const defaultCandidatos = [
       { cargo: "Presidente", nombre: "", dni: "", parentesco: "" },
-      { cargo: "Tesorero", nombre: "", dni: "", parentesco: "" },
-      { cargo: "Vocal", nombre: "", dni: "", parentesco: "" }
+      { cargo: "Tesorero(a)", nombre: "", dni: "", parentesco: "" },
+      { cargo: "Secretario(a)", nombre: "", dni: "", parentesco: "" },
+      { cargo: "Vocal 1", nombre: "", dni: "", parentesco: "" },
+      { cargo: "Vocal 2", nombre: "", dni: "", parentesco: "" }
     ];
 
     setParties([
@@ -1040,11 +1055,11 @@ export default function ApafaAdminView({
                       </div>
                     </div>
 
-                    {/* Candidatos Directivos de APAFA (Roles Reglamentarios: Presidente, Tesorero, Vocal) */}
+                    {/* Candidatos Directivos de APAFA (Presidente, Tesorero(a), Secretario(a), Vocal 1, Vocal 2) */}
                     <div className="mt-5 space-y-3">
                       <div className="flex items-center justify-between">
                         <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                          <Users className="w-3.5 h-3.5 text-amber-600" /> Integrantes del Consejo Directivo (3 Cargos)
+                          <Users className="w-3.5 h-3.5 text-amber-600" /> Integrantes del Consejo Directivo (5 Cargos)
                         </label>
                         <span className="text-[11px] text-muted-foreground font-medium">Búsqueda directa por DNI o Nombres</span>
                       </div>

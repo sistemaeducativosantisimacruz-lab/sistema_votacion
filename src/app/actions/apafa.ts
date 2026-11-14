@@ -140,8 +140,10 @@ export async function getCargosApafaAction() {
   try {
     const requiredCargos = [
       { descripcion: "Presidente", orden: 1 },
-      { descripcion: "Tesorero", orden: 2 },
-      { descripcion: "Vocal", orden: 3 }
+      { descripcion: "Tesorero(a)", orden: 2 },
+      { descripcion: "Secretario(a)", orden: 3 },
+      { descripcion: "Vocal 1", orden: 4 },
+      { descripcion: "Vocal 2", orden: 5 }
     ];
 
     const { data: existing, error } = await supabaseAdmin
@@ -156,10 +158,12 @@ export async function getCargosApafaAction() {
     }
 
     const existingNames = (existing || []).map(c => c.descripcion.toLowerCase().trim());
-    const isExact = existing && existing.length === 3 &&
+    const isExact = existing && existing.length === 5 &&
       existingNames.includes("presidente") &&
-      existingNames.includes("tesorero") &&
-      existingNames.includes("vocal");
+      existingNames.some(n => n.includes("tesorer")) &&
+      existingNames.some(n => n.includes("secretar")) &&
+      existingNames.some(n => n === "vocal 1") &&
+      existingNames.some(n => n === "vocal 2");
 
     if (!isExact) {
       await supabaseAdmin.from("cargos_apafa").delete().neq("id", "00000000-0000-0000-0000-000000000000");
@@ -176,8 +180,10 @@ export async function getCargosApafaAction() {
     return {
       data: [
         { id: "1", descripcion: "Presidente", orden: 1 },
-        { id: "2", descripcion: "Tesorero", orden: 2 },
-        { id: "3", descripcion: "Vocal", orden: 3 }
+        { id: "2", descripcion: "Tesorero(a)", orden: 2 },
+        { id: "3", descripcion: "Secretario(a)", orden: 3 },
+        { id: "4", descripcion: "Vocal 1", orden: 4 },
+        { id: "5", descripcion: "Vocal 2", orden: 5 }
       ]
     };
   }

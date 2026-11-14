@@ -41,13 +41,15 @@ CREATE TABLE IF NOT EXISTS public.cargos_apafa (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Insertar cargos directivos reglamentarios de APAFA si no existen (Presidente, Tesorero, Vocal)
+-- Insertar cargos directivos de APAFA (Presidente, Tesorero(a), Secretario(a), Vocal 1, Vocal 2)
 INSERT INTO public.cargos_apafa (descripcion, orden)
 SELECT descripcion, orden FROM (
     VALUES 
         ('Presidente', 1),
-        ('Tesorero', 2),
-        ('Vocal', 3)
+        ('Tesorero(a)', 2),
+        ('Secretario(a)', 3),
+        ('Vocal 1', 4),
+        ('Vocal 2', 5)
 ) AS t(descripcion, orden)
 WHERE NOT EXISTS (SELECT 1 FROM public.cargos_apafa LIMIT 1);
 

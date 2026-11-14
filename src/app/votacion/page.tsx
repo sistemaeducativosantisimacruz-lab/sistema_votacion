@@ -297,7 +297,7 @@ export default function VotacionPage() {
                   {/* Si es APAFA y tiene candidatos directivos */}
                   {Array.isArray(party.candidatos) && party.candidatos.filter((c: any) => c && c.nombre).length > 0 && (
                     <div className="w-full mt-3 pt-3 border-t border-border/50 text-left text-xs text-muted-foreground space-y-1">
-                      {party.candidatos.filter((c: any) => c && c.nombre).slice(0, 3).map((c: any, idx: number) => (
+                      {party.candidatos.filter((c: any) => c && c.nombre).slice(0, 5).map((c: any, idx: number) => (
                         <div key={idx} className="truncate">
                           <span className="font-semibold text-foreground">{c.cargo || 'Directivo'}:</span> {c.nombre}
                         </div>
