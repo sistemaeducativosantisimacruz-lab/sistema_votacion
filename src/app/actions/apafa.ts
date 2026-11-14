@@ -253,6 +253,123 @@ export async function searchApoderadosAction(query: string) {
   }
 }
 
+function parseFullNames(fullName: string) {
+  const clean = fullName.trim();
+  if (clean.includes(",")) {
+    const parts = clean.split(",");
+    return {
+      apellidos: parts[0].trim(),
+      nombres: parts.slice(1).join(" ").trim() || parts[0].trim()
+    };
+  }
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length <= 1) {
+    return { apellidos: clean, nombres: clean };
+  }
+  if (words.length === 2) {
+    return { nombres: words[0], apellidos: words[1] };
+  }
+  if (words.length === 3) {
+    return { nombres: words[0], apellidos: `${words[1]} ${words[2]}` };
+  }
+  const mid = Math.floor(words.length / 2);
+  return {
+    nombres: words.slice(0, mid).join(" "),
+    apellidos: words.slice(mid).join(" ")
+  };
+}
+
+async function ensureCandidateInPadron(cand: { dni?: string; nombre?: string; cargo?: string; parentesco?: string }) {
+  if (!cand || !cand.dni) return;
+  const cleanDni = cand.dni.replace(/\D/g, "").slice(0, 8);
+  if (cleanDni.length !== 8) return;
+
+  const { data: existing } = await supabaseAdmin
+    .from("apoderados")
+    .select("id")
+    .eq("dni", cleanDni)
+    .maybeSingle();
+
+  if (!existing) {
+    const { nombres, apellidos } = parseFullNames(cand.nombre || "");
+    const cargoNote = cand.cargo ? `Directivo APAFA (${cand.cargo})` : "Directivo APAFA";
+
+    await supabaseAdmin.from("apoderados").insert({
+      dni: cleanDni,
+      nombres: nombres || "Apoderado",
+      apellidos: apellidos || "Directivo",
+      parentesco: cand.parentesco || "APODERADO",
+      familia_id: `FAM-${cleanDni}`,
+      hijos: cargoNote,
+      nivel: "general",
+      grado: "Directiva",
+      seccion: "-",
+      ya_voto: false
+    });
+  }
+}
+
+export async function registerManualApoderadoAction(params: {
+  dni: string;
+  nombreCompleto: string;
+  cargo?: string;
+  parentesco?: string;
+}) {
+  try {
+    await ensureSuperAdmin();
+    const cleanDni = params.dni.replace(/\D/g, "").slice(0, 8);
+    if (cleanDni.length !== 8) {
+      return { error: "El DNI debe tener exactamente 8 dígitos para habilitar su voto." };
+    }
+
+    const { data: existing, error: checkErr } = await supabaseAdmin
+      .from("apoderados")
+      .select("id, dni, nombres, apellidos, parentesco, familia_id")
+      .eq("dni", cleanDni)
+      .maybeSingle();
+
+    if (existing) {
+      return {
+        success: true,
+        apoderado: existing,
+        alreadyExisted: true
+      };
+    }
+
+    const { nombres, apellidos } = parseFullNames(params.nombreCompleto);
+    const cargoNote = params.cargo ? `Directivo APAFA (${params.cargo})` : "Directivo APAFA";
+
+    const newApoderado = {
+      dni: cleanDni,
+      nombres: nombres || "Apoderado",
+      apellidos: apellidos || "Directivo",
+      parentesco: params.parentesco || "APODERADO",
+      familia_id: `FAM-${cleanDni}`,
+      hijos: cargoNote,
+      nivel: "general",
+      grado: "Directiva",
+      seccion: "-",
+      ya_voto: false
+    };
+
+    const { data: inserted, error: insErr } = await supabaseAdmin
+      .from("apoderados")
+      .insert(newApoderado)
+      .select()
+      .single();
+
+    if (insErr) throw insErr;
+
+    return {
+      success: true,
+      apoderado: inserted,
+      alreadyExisted: false
+    };
+  } catch (err: any) {
+    return { error: err.message || "Error al registrar el apoderado en la base de datos." };
+  }
+}
+
 export async function getApafaWorkspaceDataAction(workspace: "oficial" | "simulacro") {
   try {
     const isSimulacro = workspace === "simulacro";
@@ -363,6 +480,12 @@ export async function saveApafaElectionAction(electionData: {
         color: p.color || null,
         candidatos: p.candidatos || []
       };
+
+      if (Array.isArray(p.candidatos)) {
+        for (const cand of p.candidatos) {
+          await ensureCandidateInPadron(cand);
+        }
+      }
 
       if (p.id && !p.id.startsWith("temp-")) {
         const { data: updated, error: updPErr } = await supabaseAdmin
@@ -479,6 +602,12 @@ export async function saveSingleApafaPartyAction(params: {
     };
 
     let savedParty: any = null;
+
+    if (Array.isArray(party.candidatos)) {
+      for (const cand of party.candidatos) {
+        await ensureCandidateInPadron(cand);
+      }
+    }
 
     if (party.id && !party.id.startsWith("temp-")) {
       const { data, error } = await supabaseAdmin

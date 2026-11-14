@@ -22,7 +22,8 @@ import {
   getCargosApafaAction,
   searchApoderadosAction,
   saveSingleApafaPartyAction,
-  generateMockVotesApafaAction
+  generateMockVotesApafaAction,
+  registerManualApoderadoAction
 } from "@/app/actions/apafa";
 import { parseApafaWorkbook, parseApafaWorkbooks } from "@/lib/apafaExcelParser";
 
@@ -60,6 +61,7 @@ export default function ApafaAdminView({
   const [isSearchingMap, setIsSearchingMap] = useState<{ [key: string]: boolean }>({});
   const [activeSearchKey, setActiveSearchKey] = useState<string | null>(null);
   const [manualCandidateForm, setManualCandidateForm] = useState<{ [key: string]: { nombres: string; dni: string; parentesco: string } }>({});
+  const [savingManualCandidateKey, setSavingManualCandidateKey] = useState<string | null>(null);
   const [savingPartyIdx, setSavingPartyIdx] = useState<number | null>(null);
   const [savedPartyIdx, setSavedPartyIdx] = useState<number | null>(null);
 
@@ -351,6 +353,50 @@ export default function ApafaAdminView({
       }
     }));
     setActiveSearchKey(null);
+  };
+
+  const handleConfirmManualCandidate = async (pIdx: number, cIdx: number, candCargo: string) => {
+    const key = `${pIdx}-${cIdx}`;
+    const form = manualCandidateForm[key];
+    if (!form || !form.nombres.trim()) return;
+
+    const cleanDni = (form.dni || "").replace(/\D/g, "").slice(0, 8);
+    setSavingManualCandidateKey(key);
+
+    try {
+      if (cleanDni) {
+        if (cleanDni.length !== 8) {
+          alert("El DNI debe tener 8 dígitos numéricos para que el directivo pueda votar en el sistema.");
+          setSavingManualCandidateKey(null);
+          return;
+        }
+        // Registrar en la base de datos (padrón de apoderados) para que pueda votar
+        const res = await registerManualApoderadoAction({
+          dni: cleanDni,
+          nombreCompleto: form.nombres.trim(),
+          cargo: candCargo,
+          parentesco: form.parentesco || "APODERADO"
+        });
+        if (res.error) {
+          console.warn("Aviso al registrar integrante en padrón:", res.error);
+        }
+      }
+
+      handleSelectCandidate(pIdx, cIdx, {
+        nombres: form.nombres.trim(),
+        dni: cleanDni,
+        parentesco: form.parentesco || "APODERADO"
+      });
+    } catch (err: any) {
+      console.error("Error al registrar candidato manual:", err);
+      handleSelectCandidate(pIdx, cIdx, {
+        nombres: form.nombres.trim(),
+        dni: cleanDni,
+        parentesco: "APODERADO"
+      });
+    } finally {
+      setSavingManualCandidateKey(null);
+    }
   };
 
   const handleSelectCandidate = (partyIdx: number, candIdx: number, apoderado: any) => {
@@ -1177,7 +1223,7 @@ export default function ApafaAdminView({
 
                                   <div className="flex items-center justify-between pt-1 flex-wrap gap-2 border-t border-slate-200 dark:border-slate-800">
                                     <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                                      * Escribe los datos directamente si el apoderado no figura en el padrón.
+                                      * Se guardará en la base de datos para habilitar su voto como apoderado.
                                     </span>
                                     <div className="flex gap-2">
                                       <button
@@ -1189,17 +1235,19 @@ export default function ApafaAdminView({
                                       </button>
                                       <button
                                         type="button"
-                                        disabled={!manualForm.nombres.trim()}
-                                        onClick={() => {
-                                          handleSelectCandidate(pIdx, cIdx, {
-                                            nombres: manualForm.nombres.trim(),
-                                            dni: manualForm.dni.trim(),
-                                            parentesco: "APODERADO"
-                                          });
-                                        }}
+                                        disabled={!manualForm.nombres.trim() || savingManualCandidateKey === searchKey}
+                                        onClick={() => handleConfirmManualCandidate(pIdx, cIdx, cand.cargo)}
                                         className="px-5 py-2 rounded-xl text-xs font-black bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100 shadow-sm transition-all disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
                                       >
-                                        <Check className="w-4 h-4 stroke-[2.5]" /> Asignar como {cand.cargo}
+                                        {savingManualCandidateKey === searchKey ? (
+                                          <>
+                                            <Loader2 className="w-4 h-4 animate-spin" /> Guardando en BD...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Check className="w-4 h-4 stroke-[2.5]" /> Guardar y Asignar como {cand.cargo}
+                                          </>
+                                        )}
                                       </button>
                                     </div>
                                   </div>
