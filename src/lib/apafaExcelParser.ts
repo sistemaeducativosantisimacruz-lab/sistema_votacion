@@ -152,7 +152,7 @@ export function parseNivelGradoSeccion(headerText: string, sheetName: string, fi
   };
 }
 
-// Detecta dinámicamente las columnas de Alumno, Padre y Madre en cualquier estructura de Excel
+// Localiza el inicio de los datos y las columnas exactas
 function detectColumns(rows: any[][]) {
   const headerRowIndices: number[] = [];
   for (let r = 0; r < Math.min(8, rows.length); r++) {
@@ -169,161 +169,41 @@ function detectColumns(rows: any[][]) {
     }
   }
 
-  const startDataRow = headerRowIndices.length > 0 ? Math.max(...headerRowIndices) + 1 : 5;
-  const maxCols = Math.max(...rows.slice(0, startDataRow).map(r => r.length), 10);
-  const colHeaders: string[] = [];
-
-  for (let c = 0; c < maxCols; c++) {
-    const texts: string[] = [];
-    for (const r of headerRowIndices) {
-      const cellVal = String(rows[r]?.[c] || "").trim();
-      if (cellVal) texts.push(cellVal.toUpperCase());
-    }
-    const fullText = texts.join(" ");
-    const cleaned = fullText.replace(/PADR[OÓ]N\s+(?:DE\s+)?PADRES\s+(?:DE\s+FAMILIA)?/gi, " ").trim();
-    colHeaders.push(cleaned);
+  // La fila donde inician los datos es inmediatamente posterior a los encabezados
+  let startDataRow = headerRowIndices.length > 0 ? Math.max(...headerRowIndices) + 1 : 4;
+  while (startDataRow < rows.length && (!rows[startDataRow] || rows[startDataRow].length === 0 || rows[startDataRow].every((c: any) => !String(c).trim()))) {
+    startDataRow++;
   }
 
-  let padreStartCol = -1;
-  let madreStartCol = -1;
-  for (let c = 0; c < colHeaders.length; c++) {
-    const h = colHeaders[c];
-    if (h.includes("PADRE") || h.includes("PAPA") || h.includes("PAPÁ")) {
-      if (padreStartCol === -1) padreStartCol = c;
-    }
-    if (h.includes("MADRE") || h.includes("MAMA") || h.includes("MAMÁ")) {
-      if (madreStartCol === -1) madreStartCol = c;
-    }
+  let offset = 1;
+  const sampleRow = rows[startDataRow] || [];
+  const col0Dni = cleanDni(sampleRow[0]);
+  const col1Dni = cleanDni(sampleRow[1]);
+  if (col0Dni && col0Dni.length === 8 && (!col1Dni || col1Dni.length !== 8)) {
+    offset = 0;
   }
 
-  if (padreStartCol === -1) padreStartCol = 5;
-  if (madreStartCol === -1) madreStartCol = 7;
-
-  let padreNameCol = -1;
-  let padreDniCol = -1;
-  let madreNameCol = -1;
-  let madreDniCol = -1;
-
-  for (let c = padreStartCol; c < (madreStartCol !== -1 ? madreStartCol : padreStartCol + 2); c++) {
-    const h = colHeaders[c] || "";
-    if (h.includes("DNI") || h.includes("DOC")) padreDniCol = c;
-    else if (h.includes("NOMBRE") || h.includes("APELLIDO") || h.includes("PADRE")) padreNameCol = c;
-  }
-
-  const madreEndCol = colHeaders.length;
-  for (let c = madreStartCol; c < Math.min(madreStartCol + 3, madreEndCol); c++) {
-    const h = colHeaders[c] || "";
-    if (h.includes("DNI") || h.includes("DOC")) madreDniCol = c;
-    else if (h.includes("NOMBRE") || h.includes("APELLIDO") || h.includes("MADRE")) madreNameCol = c;
-  }
-
-  const sampleDataRows = rows.slice(startDataRow, startDataRow + 5).filter(r => r && r.length > 0);
-
-  // Verificación con datos reales de filas si el encabezado no fue concluyente
-  if (padreNameCol === -1 || padreDniCol === -1 || padreNameCol === padreDniCol) {
-    const c1 = padreStartCol;
-    const c2 = padreStartCol + 1;
-    let c1Digits = 0;
-    let c2Digits = 0;
-    for (const r of sampleDataRows) {
-      if (/^\d{7,9}$/.test(String(r[c1] || "").replace(/\D/g, ""))) c1Digits++;
-      if (/^\d{7,9}$/.test(String(r[c2] || "").replace(/\D/g, ""))) c2Digits++;
-    }
-    if (c2Digits >= c1Digits) {
-      padreDniCol = c2;
-      padreNameCol = c1;
-    } else {
-      padreDniCol = c1;
-      padreNameCol = c2;
-    }
-  }
-
-  if (madreNameCol === -1 || madreDniCol === -1 || madreNameCol === madreDniCol) {
-    const c1 = madreStartCol;
-    const c2 = madreStartCol + 1;
-    let c1Digits = 0;
-    let c2Digits = 0;
-    for (const r of sampleDataRows) {
-      if (/^\d{7,9}$/.test(String(r[c1] || "").replace(/\D/g, ""))) c1Digits++;
-      if (/^\d{7,9}$/.test(String(r[c2] || "").replace(/\D/g, ""))) c2Digits++;
-    }
-    if (c2Digits >= c1Digits) {
-      madreDniCol = c2;
-      madreNameCol = c1;
-    } else {
-      madreDniCol = c1;
-      madreNameCol = c2;
-    }
-  }
-
-  // Detección de columnas de alumno (anteriores a la columna del padre)
-  let alumnoDniCol = -1;
-  const alumnoNameCols: number[] = [];
-  for (let c = 0; c < padreStartCol; c++) {
-    const h = colHeaders[c] || "";
-    if (h.includes("DNI") && alumnoDniCol === -1) {
-      alumnoDniCol = c;
-    } else if (h.includes("APELLIDO") || h.includes("NOMBRE") || h.includes("ALUMNO") || h.includes("ESTUDIANTE")) {
-      alumnoNameCols.push(c);
-    }
-  }
-
-  if (alumnoDniCol === -1) {
-    for (let c = 0; c < padreStartCol; c++) {
-      let digitsCount = 0;
-      for (const r of sampleDataRows) {
-        if (/^\d{7,9}$/.test(String(r[c] || "").replace(/\D/g, ""))) digitsCount++;
-      }
-      if (digitsCount > 0) {
-        alumnoDniCol = c;
-        break;
-      }
-    }
-  }
-
-  if (alumnoNameCols.length === 0) {
-    for (let c = 0; c < padreStartCol; c++) {
-      if (c !== alumnoDniCol && c !== 0) {
-        alumnoNameCols.push(c);
-      }
-    }
-  }
-
+  // En el formato oficial de padrones del colegio (con columna ITEM en A):
+  // Col 0: ITEM (A)
+  // Col 1: DNI Alumno (B)
+  // Col 2: Apellido Paterno Alumno (C)
+  // Col 3: Apellido Materno Alumno (D)
+  // Col 4: Nombres Alumno (E)
+  // Col 5: Apellidos y Nombres Padre (F)
+  // Col 6: DNI Padre (G)
+  // Col 7: Apellidos y Nombres Madre (H)
+  // Col 8: DNI Madre (I)
   return {
     startDataRow,
-    alumnoDniCol: alumnoDniCol !== -1 ? alumnoDniCol : 1,
-    alumnoNameCols: alumnoNameCols.length > 0 ? alumnoNameCols : [2, 3, 4],
-    padreNameCol,
-    padreDniCol,
-    madreNameCol,
-    madreDniCol,
+    dniAlumno: offset,
+    apPaterno: offset + 1,
+    apMaterno: offset + 2,
+    nombres: offset + 3,
+    padreNombre: offset + 4,
+    padreDni: offset + 5,
+    madreNombre: offset + 6,
+    madreDni: offset + 7,
   };
-}
-
-// Estructura Union-Find para unificar familias sin importar el orden de hojas
-class DisjointSet {
-  private parent: Map<string, string> = new Map();
-
-  find(item: string): string {
-    if (!this.parent.has(item)) {
-      this.parent.set(item, item);
-      return item;
-    }
-    const p = this.parent.get(item)!;
-    if (p === item) return item;
-    const root = this.find(p);
-    this.parent.set(item, root);
-    return root;
-  }
-
-  union(a: string, b: string): string {
-    const rootA = this.find(a);
-    const rootB = this.find(b);
-    if (rootA !== rootB) {
-      this.parent.set(rootB, rootA);
-    }
-    return rootA;
-  }
 }
 
 interface RawParentEntry {
@@ -331,6 +211,7 @@ interface RawParentEntry {
   nombres: string;
   apellidos: string;
   parentesco: "PADRE" | "MADRE" | "APODERADO";
+  familia_id: string;
   hijos: Set<string>;
   grados: Set<string>;
   secciones: Set<string>;
@@ -340,14 +221,18 @@ interface RawParentEntry {
 export type WorkbookInput = string | ArrayBuffer | { name?: string; data: string | ArrayBuffer };
 
 /**
- * Parsea múltiples libros Excel (ej. Primaria y Secundaria) verificando en qué listas aparece cada padre/madre
- * y acumulando con precisión sus grados, secciones e hijos a cargo.
+ * Parsea múltiples libros Excel (ej. Primaria y Secundaria) leyendo fila por fila.
+ * Cada fila corresponde exactamente a un estudiante y sus respectivos padres.
+ * Si la misma pareja de padres aparece en varias listas (por tener varios hijos),
+ * se conforma su familia unificada con todos sus hijos a cargo (1 solo voto por familia).
+ * Si un padre o madre tiene hijos con parejas diferentes, cada pareja conforma su propia familia
+ * independiente sin mezclar indebidamente a las madres ni a los padres.
  */
 export function parseApafaWorkbooks(workbooksData: WorkbookInput[]): ParseApafaResult {
   const warnings: string[] = [];
   const processedSheets: string[] = [];
-  const dsu = new DisjointSet();
   const rawParentsMap = new Map<string, RawParentEntry>();
+  const distinctFamilies = new Set<string>();
 
   for (const item of workbooksData) {
     const rawData = (typeof item === "object" && item !== null && "data" in item) ? item.data : item;
@@ -379,20 +264,35 @@ export function parseApafaWorkbooks(workbooksData: WorkbookInput[]): ParseApafaR
 
       let sheetRowsCount = 0;
 
-      // 2. Iterar las filas de estudiantes de esta hoja
+      // 2. Iterar fila por fila: cada fila contiene al estudiante y sus respectivos padres
       for (let r = cols.startDataRow; r < rows.length; r++) {
         const row = rows[r];
         if (!row || row.length === 0) continue;
 
-        const dniAlumno = cleanDni(row[cols.alumnoDniCol]);
-        const alumnoNames = cols.alumnoNameCols.map(c => String(row[c] || "").trim()).filter(Boolean).join(" ");
-        const alumnoFullName = alumnoNames || (dniAlumno ? `Alumno DNI ${dniAlumno}` : "");
+        // Estudiante de la fila
+        const dniAlumno = cleanDni(row[cols.dniAlumno]);
+        const apPaterno = String(row[cols.apPaterno] || "").trim();
+        const apMaterno = String(row[cols.apMaterno] || "").trim();
+        const nombresAlumno = String(row[cols.nombres] || "").trim();
+        const alumnoFullName = `${apPaterno} ${apMaterno} ${nombresAlumno}`.trim() || (dniAlumno ? `Alumno DNI ${dniAlumno}` : "");
 
-        const rawPadreNombre = String(row[cols.padreNameCol] || "").trim();
-        const dniPadre = cleanDni(row[cols.padreDniCol]);
+        // Padre de la fila
+        let rawPadreNombre = String(row[cols.padreNombre] || "").trim();
+        let dniPadre = cleanDni(row[cols.padreDni]);
 
-        const rawMadreNombre = String(row[cols.madreNameCol] || "").trim();
-        const dniMadre = cleanDni(row[cols.madreDniCol]);
+        // Madre de la fila
+        let rawMadreNombre = String(row[cols.madreNombre] || "").trim();
+        let dniMadre = cleanDni(row[cols.madreDni]);
+
+        // Autocorrección si en alguna fila se invirtieron columnas de DNI y Nombre
+        if (!dniPadre && cleanDni(rawPadreNombre)) {
+          dniPadre = cleanDni(rawPadreNombre);
+          rawPadreNombre = String(row[cols.padreDni] || "").trim();
+        }
+        if (!dniMadre && cleanDni(rawMadreNombre)) {
+          dniMadre = cleanDni(rawMadreNombre);
+          rawMadreNombre = String(row[cols.madreDni] || "").trim();
+        }
 
         // Si la fila está totalmente vacía de padres y alumnos, omitir
         if (!dniPadre && !dniMadre && !rawPadreNombre && !rawMadreNombre) {
@@ -401,18 +301,24 @@ export function parseApafaWorkbooks(workbooksData: WorkbookInput[]): ParseApafaR
 
         sheetRowsCount++;
 
-        // Unificar padre y madre en el mismo grupo familiar si ambos tienen DNI
+        // IDENTIFICADOR DE FAMILIA POR PAREJA EXACTA DE LA FILA:
+        // Evita mezclar a madres o padres de familias distintas
+        let familyId = "";
         if (dniPadre && dniMadre) {
-          dsu.union(dniPadre, dniMadre);
+          familyId = `FAM-${[dniPadre, dniMadre].sort().join("_")}`;
         } else if (dniPadre) {
-          dsu.find(dniPadre);
+          familyId = `FAM-${dniPadre}`;
         } else if (dniMadre) {
-          dsu.find(dniMadre);
+          familyId = `FAM-${dniMadre}`;
+        }
+
+        if (familyId) {
+          distinctFamilies.add(familyId);
         }
 
         const hijoResumen = `${alumnoFullName} (${grado} "${seccion}" ${nivel})`.trim();
 
-        // Registrar / actualizar datos de aparición del PADRE
+        // 3. Registrar / actualizar al PADRE de esta fila
         if (dniPadre && rawPadreNombre) {
           if (!rawParentsMap.has(dniPadre)) {
             const { apellidos, nombres } = splitFullName(rawPadreNombre);
@@ -421,6 +327,7 @@ export function parseApafaWorkbooks(workbooksData: WorkbookInput[]): ParseApafaR
               nombres: nombres || rawPadreNombre,
               apellidos: apellidos || rawPadreNombre,
               parentesco: "PADRE",
+              familia_id: familyId,
               hijos: new Set<string>(),
               grados: new Set<string>(),
               secciones: new Set<string>(),
@@ -432,9 +339,13 @@ export function parseApafaWorkbooks(workbooksData: WorkbookInput[]): ParseApafaR
           if (grado) p.grados.add(grado);
           if (seccion) p.secciones.add(seccion);
           if (nivel) p.niveles.add(nivel);
+          // Si tiene pareja en esta fila, fijar familia_id de la pareja
+          if (dniMadre) {
+            p.familia_id = familyId;
+          }
         }
 
-        // Registrar / actualizar datos de aparición de la MADRE
+        // 4. Registrar / actualizar a la MADRE de esta fila
         if (dniMadre && rawMadreNombre) {
           if (!rawParentsMap.has(dniMadre)) {
             const { apellidos, nombres } = splitFullName(rawMadreNombre);
@@ -443,6 +354,7 @@ export function parseApafaWorkbooks(workbooksData: WorkbookInput[]): ParseApafaR
               nombres: nombres || rawMadreNombre,
               apellidos: apellidos || rawMadreNombre,
               parentesco: "MADRE",
+              familia_id: familyId,
               hijos: new Set<string>(),
               grados: new Set<string>(),
               secciones: new Set<string>(),
@@ -454,6 +366,10 @@ export function parseApafaWorkbooks(workbooksData: WorkbookInput[]): ParseApafaR
           if (grado) m.grados.add(grado);
           if (seccion) m.secciones.add(seccion);
           if (nivel) m.niveles.add(nivel);
+          // Si tiene pareja en esta fila, fijar familia_id de la pareja
+          if (dniPadre) {
+            m.familia_id = familyId;
+          }
         }
       }
 
@@ -463,71 +379,76 @@ export function parseApafaWorkbooks(workbooksData: WorkbookInput[]): ParseApafaR
     }
   }
 
-  // 3. Fusión final por Grupo Familiar (unifica hijos, grados y secciones de padre y madre en todas las listas)
-  const familyToMembersMap = new Map<string, RawParentEntry[]>();
+  // 5. Unificar los hijos, grados, secciones y niveles para los miembros que comparten la misma familia_id
+  const familyAggregates = new Map<string, {
+    hijos: Set<string>;
+    grados: Set<string>;
+    secciones: Set<string>;
+    niveles: Set<string>;
+  }>();
 
-  for (const [dni, parent] of rawParentsMap.entries()) {
-    const rootDni = dsu.find(dni);
-    const familiaId = `FAM-${rootDni}`;
-    if (!familyToMembersMap.has(familiaId)) {
-      familyToMembersMap.set(familiaId, []);
+  for (const parent of rawParentsMap.values()) {
+    if (!familyAggregates.has(parent.familia_id)) {
+      familyAggregates.set(parent.familia_id, {
+        hijos: new Set<string>(),
+        grados: new Set<string>(),
+        secciones: new Set<string>(),
+        niveles: new Set<string>(),
+      });
     }
-    familyToMembersMap.get(familiaId)!.push(parent);
+    const agg = familyAggregates.get(parent.familia_id)!;
+    parent.hijos.forEach(h => agg.hijos.add(h));
+    parent.grados.forEach(g => agg.grados.add(g));
+    parent.secciones.forEach(s => agg.secciones.add(s));
+    parent.niveles.forEach(n => agg.niveles.add(n));
   }
 
+  // 6. Construcción de la lista final de apoderados con sus datos acumulados
   const finalApoderadosList: ApoderadoParsed[] = [];
 
-  for (const [familiaId, members] of familyToMembersMap.entries()) {
-    const combinedHijos = new Set<string>();
-    const combinedGrados = new Set<string>();
-    const combinedSecciones = new Set<string>();
-    const combinedNiveles = new Set<string>();
+  for (const parent of rawParentsMap.values()) {
+    const agg = familyAggregates.get(parent.familia_id) || {
+      hijos: parent.hijos,
+      grados: parent.grados,
+      secciones: parent.secciones,
+      niveles: parent.niveles,
+    };
 
-    for (const m of members) {
-      m.hijos.forEach(h => combinedHijos.add(h));
-      m.grados.forEach(g => combinedGrados.add(g));
-      m.secciones.forEach(s => combinedSecciones.add(s));
-      m.niveles.forEach(n => combinedNiveles.add(n));
-    }
-
-    // Ordenar numéricamente los grados: 1°, 2°, 3°, etc.
-    const sortedGrados = Array.from(combinedGrados).sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0));
-    const sortedSecs = Array.from(combinedSecciones).sort();
+    const sortedGrados = Array.from(agg.grados).sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0));
+    const sortedSecs = Array.from(agg.secciones).sort();
 
     let finalNivel = "primaria";
-    if (combinedNiveles.has("secundaria") && combinedNiveles.has("primaria")) {
+    if (agg.niveles.has("secundaria") && agg.niveles.has("primaria")) {
       finalNivel = "mixto";
-    } else if (combinedNiveles.has("secundaria")) {
+    } else if (agg.niveles.has("secundaria")) {
       finalNivel = "secundaria";
-    } else if (combinedNiveles.has("inicial")) {
+    } else if (agg.niveles.has("inicial")) {
       finalNivel = "inicial";
     }
 
     const finalGrado = sortedGrados.join(", ");
     const finalSeccion = sortedSecs.join(", ");
-    const finalHijos = Array.from(combinedHijos).join("; ");
+    const finalHijos = Array.from(agg.hijos).join("; ");
 
-    for (const m of members) {
-      finalApoderadosList.push({
-        dni: m.dni,
-        nombres: m.nombres,
-        apellidos: m.apellidos,
-        parentesco: m.parentesco,
-        familia_id: familiaId,
-        hijos: finalHijos,
-        nivel: finalNivel,
-        grado: finalGrado,
-        seccion: finalSeccion,
-        ya_voto: false,
-      });
-    }
+    finalApoderadosList.push({
+      dni: parent.dni,
+      nombres: parent.nombres,
+      apellidos: parent.apellidos,
+      parentesco: parent.parentesco,
+      familia_id: parent.familia_id,
+      hijos: finalHijos,
+      nivel: finalNivel,
+      grado: finalGrado,
+      seccion: finalSeccion,
+      ya_voto: false,
+    });
   }
 
   return {
     apoderados: finalApoderadosList,
     totalSheets: processedSheets.length,
     sheetNames: processedSheets,
-    totalFamilias: familyToMembersMap.size,
+    totalFamilias: distinctFamilies.size,
     totalApoderados: finalApoderadosList.length,
     warnings,
   };

@@ -882,24 +882,13 @@ export async function uploadPadronApafaAction(apoderadosList: any[]) {
       throw new Error("No hay registros de apoderados válidos para cargar.");
     }
 
-    // 1. Obtener votos emitidos y TODOS los apoderados existentes (paginando para no topar el límite de 1000 de Supabase)
+    // 1. Obtener el historial de votos y los DNIs de las personas que efectivamente votaron
+    // Paginando de 1000 en 1000 para superar el límite de Supabase
     const existingMap = new Map<string, any>();
-    const votedFamiliaIds = new Set<string>();
-    const votedInfoByFamily = new Map<string, string>();
+    const votedDnis = new Set<string>();
+    const votedInfoByDni = new Map<string, string>();
 
     try {
-      // 1.1 Identificar familias que ya votaron en la tabla independiente de votos_apafa
-      const { data: votosList } = await supabaseAdmin
-        .from("votos_apafa")
-        .select("familia_id");
-
-      if (votosList) {
-        for (const v of votosList) {
-          if (v.familia_id) votedFamiliaIds.add(v.familia_id);
-        }
-      }
-
-      // 1.2 Cargar todos los registros existentes paginando de 1000 en 1000
       let from = 0;
       const step = 1000;
       while (true) {
@@ -911,13 +900,26 @@ export async function uploadPadronApafaAction(apoderadosList: any[]) {
         if (exErr || !chunk || chunk.length === 0) break;
 
         for (const item of chunk) {
-          existingMap.set(item.dni, item);
+          const cleanDniVal = (item.dni || "").toString().trim().padStart(8, "0");
+          existingMap.set(cleanDniVal, item);
+
           if (item.ya_voto) {
-            if (item.familia_id) {
-              votedFamiliaIds.add(item.familia_id);
-              if (item.voto_emitido_por) {
-                votedInfoByFamily.set(item.familia_id, item.voto_emitido_por);
+            // Extraer el DNI del apoderado que efectivamente emitió el voto
+            let specificVoterDni = "";
+            if (item.voto_emitido_por) {
+              const match = item.voto_emitido_por.match(/DNI\s*([0-9]{7,9})/i);
+              if (match && match[1]) {
+                specificVoterDni = match[1].padStart(8, "0");
               }
+            }
+
+            if (specificVoterDni) {
+              votedDnis.add(specificVoterDni);
+              votedInfoByDni.set(specificVoterDni, item.voto_emitido_por);
+            } else {
+              // Si no tiene detalle con DNI explícito, registrar este DNI como votante
+              votedDnis.add(cleanDniVal);
+              votedInfoByDni.set(cleanDniVal, item.voto_emitido_por || "Voto de familia ya emitido");
             }
           }
         }
@@ -929,93 +931,42 @@ export async function uploadPadronApafaAction(apoderadosList: any[]) {
       console.warn("Aviso al consultar apoderados existentes:", e);
     }
 
-    // 2. Mapear incoming familia_id a canonical existing familia_id si alguno de los miembros ya existe en BD
-    const incomingToCanonicalFamiliaId = new Map<string, string>();
-    for (const ap of apoderadosList) {
-      const existing = existingMap.get(ap.dni);
-      if (existing && existing.familia_id) {
-        incomingToCanonicalFamiliaId.set(ap.familia_id, existing.familia_id);
-      }
-    }
-
-    // 3. Fusionar datos entrantes con existentes garantizando que NINGÚN voto previo se pierda
+    // 2. Procesar cada apoderado con su nueva estructura familiar limpia
+    // Cada fila del Excel corresponde al estudiante y sus respectivos padres.
+    // Si la misma pareja de padres aparece en varias listas, comparten la misma familia_id
+    // y se preserva el principio de 1 voto por familia sin contaminar a otras familias.
     const mergedList = apoderadosList.map(ap => {
-      const existing = existingMap.get(ap.dni);
-      // Usar familia_id canónico si algún miembro de la familia ya existía en la BD
-      let familiaId = incomingToCanonicalFamiliaId.get(ap.familia_id) || existing?.familia_id || ap.familia_id;
-      let hijos = ap.hijos;
-      let grado = ap.grado;
-      let seccion = ap.seccion;
-      let nivel = ap.nivel;
+      // Obtener los DNIs que conforman esta familia
+      // Formato: "FAM-12345678_87654321" o "FAM-12345678"
+      const familyDnis = (ap.familia_id || "")
+        .replace(/^FAM-/, "")
+        .split("_")
+        .map((d: string) => d.trim().padStart(8, "0"))
+        .filter(Boolean);
 
-      if (existing) {
-        // Fusionar la lista de hijos (evitando duplicar cadenas idénticas)
-        const currentHijos = (existing.hijos || "").split(";").map((h: string) => h.trim()).filter(Boolean);
-        const incomingHijos = (ap.hijos || "").split(";").map((h: string) => h.trim()).filter(Boolean);
-        const uniqueHijos = Array.from(new Set([...incomingHijos, ...currentHijos]));
-        hijos = uniqueHijos.join("; ") || ap.hijos;
-
-        // Combinar grados únicos
-        const incomingGrados = (ap.grado || "").split(",").map((g: string) => g.trim()).filter(Boolean);
-        const existingGrados = (existing.grado || "").split(",").map((g: string) => g.trim()).filter(Boolean);
-        
-        // Si existingGrados contenía solo "2°" debido a un bug de año previo pero ap no lo incluye, filtrarlo
-        const validExistingGrados = existingGrados.filter((g: string) => {
-          if (g === "2°" && !incomingGrados.includes("2°") && !existing.hijos?.includes("2°")) {
-            return false;
-          }
-          return true;
-        });
-
-        const allGrados = Array.from(new Set([...incomingGrados, ...validExistingGrados]));
-        allGrados.sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0));
-        grado = allGrados.join(", ") || ap.grado;
-
-        // Combinar secciones únicas
-        const incomingSecs = (ap.seccion || "").split(",").map((s: string) => s.trim()).filter(Boolean);
-        const existingSecs = (existing.seccion || "").split(",").map((s: string) => s.trim()).filter(Boolean);
-        const allSecs = Array.from(new Set([...incomingSecs, ...existingSecs])).sort();
-        seccion = allSecs.join(", ") || ap.seccion;
-
-        // Combinar niveles
-        const incomingNiveles = (ap.nivel || "").split(",").map((n: string) => n.trim().toLowerCase()).filter(Boolean);
-        const existingNiveles = (existing.nivel || "").split(",").map((n: string) => n.trim().toLowerCase()).filter(Boolean);
-        const allNiv = new Set([...incomingNiveles, ...existingNiveles]);
-        if (allNiv.has("mixto") || (allNiv.has("primaria") && allNiv.has("secundaria"))) {
-          nivel = "mixto";
-        } else if (allNiv.has("secundaria")) {
-          nivel = "secundaria";
-        } else {
-          nivel = "primaria";
-        }
-      }
-
-      // Verificación estricta de voto previo por DNI o por Grupo Familiar
-      const hasVoted = Boolean(
-        existing?.ya_voto ||
-        votedFamiliaIds.has(familiaId) ||
-        (existing?.familia_id && votedFamiliaIds.has(existing.familia_id)) ||
-        (ap.familia_id && votedFamiliaIds.has(ap.familia_id))
-      );
-
-      const voteInfo = existing?.voto_emitido_por || 
-        votedInfoByFamily.get(familiaId) || 
-        (existing?.familia_id ? votedInfoByFamily.get(existing.familia_id) : null) || 
-        (hasVoted ? "Voto de familia ya emitido" : null);
+      // Si algún miembro de esta familia emitió voto, la familia ya votó
+      const voterDniInFamily = familyDnis.find((d: string) => votedDnis.has(d));
+      const hasVoted = Boolean(voterDniInFamily);
+      const voteInfo = voterDniInFamily
+        ? (votedInfoByDni.get(voterDniInFamily) || "Voto de familia ya emitido")
+        : null;
 
       return {
-        ...ap,
-        familia_id: familiaId,
-        hijos,
-        grado,
-        seccion,
-        nivel,
+        dni: ap.dni,
+        nombres: ap.nombres,
+        apellidos: ap.apellidos,
+        parentesco: ap.parentesco,
+        familia_id: ap.familia_id,
+        hijos: ap.hijos,
+        grado: ap.grado,
+        seccion: ap.seccion,
+        nivel: ap.nivel,
         ya_voto: hasVoted,
         voto_emitido_por: voteInfo,
       };
     });
 
-    // Upsert por lotes de 500 para evitar sobrecarga en la consulta HTTP
+    // 3. Upsert por lotes de 500 para evitar sobrecarga en la consulta HTTP
     const chunkSize = 500;
     let insertedCount = 0;
 
