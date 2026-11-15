@@ -316,7 +316,8 @@ export function parseApafaWorkbooks(workbooksData: WorkbookInput[]): ParseApafaR
           distinctFamilies.add(familyId);
         }
 
-        const hijoResumen = `${alumnoFullName} (${grado} "${seccion}" ${nivel})`.trim();
+        const dniPrefix = dniAlumno ? `${dniAlumno} - ` : "";
+        const hijoResumen = `${dniPrefix}${alumnoFullName} (${grado} "${seccion}" ${nivel})`.trim();
 
         // 3. Registrar / actualizar al PADRE de esta fila
         if (dniPadre && rawPadreNombre) {

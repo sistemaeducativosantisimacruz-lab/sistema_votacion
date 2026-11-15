@@ -26,7 +26,8 @@ import {
   registerManualApoderadoAction,
   getFamilyDetailsAction,
   saveFamilyApoderadosAction,
-  deleteApoderadoAction
+  deleteApoderadoAction,
+  getAllApoderadosForExportAction
 } from "@/app/actions/apafa";
 import { parseApafaWorkbook, parseApafaWorkbooks } from "@/lib/apafaExcelParser";
 
@@ -88,6 +89,12 @@ export default function ApafaAdminView({
   // Modales
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [isGeneratingMock, setIsGeneratingMock] = useState(false);
+
+  // Estados para Modal de Descarga de Padrón por Estudiantes (por Libros / Aulas)
+  const [showStudentExportModal, setShowStudentExportModal] = useState(false);
+  const [exportingStudents, setExportingStudents] = useState(false);
+  const [detectedClassrooms, setDetectedClassrooms] = useState<string[]>([]);
+  const [selectedClassroom, setSelectedClassroom] = useState<string>("");
 
   // Estados para Modal Añadir / Editar Miembros de Familia (Padrón APAFA)
   const [showFamilyModal, setShowFamilyModal] = useState(false);
@@ -1152,12 +1159,12 @@ export default function ApafaAdminView({
     }
   };
 
-  // 7. Descargar Padrón APAFA a Excel
+  // 7. Descargar Padrón APAFA a Excel (Lista general de apoderados)
   const handleDownloadPadron = async () => {
     try {
       setLoading(true);
-      // Obtener todos los apoderados
-      const res = await getPadronApafaAction({ pageSize: 10000 });
+      // Obtener todos los apoderados sin truncamiento de paginación
+      const res = await getAllApoderadosForExportAction();
       if (!res.data || res.data.length === 0) {
         setMessage({ type: "error", text: "No hay apoderados registrados para exportar." });
         return;
@@ -1216,7 +1223,440 @@ export default function ApafaAdminView({
     }
   };
 
-  // 7.1. Descargar Formato Modelo de Excel para APAFA
+  // 7.1 Abrir modal de exportación por estudiante y detectar aulas disponibles
+  const openStudentExportModal = async () => {
+    setShowStudentExportModal(true);
+    try {
+      const res = await getAllApoderadosForExportAction();
+      if (res.data && res.data.length > 0) {
+        const found = new Set<string>();
+        for (const ap of res.data) {
+          const rawHijos = (ap.hijos || "").split(";");
+          for (const h of rawHijos) {
+            const m = h.match(/\b([1-6])\s*(?:°|º)?\s*["“”]?\s*([A-Z])\s*["“”]?\s*(primaria|secundaria|inicial)?/i);
+            if (m) {
+              const g = `${m[1]}°`;
+              const s = m[2].toUpperCase();
+              let niv = (m[3] || ap.nivel || "primaria").toLowerCase();
+              if (niv === "mixto") {
+                niv = h.toLowerCase().includes("sec") ? "secundaria" : "primaria";
+              }
+              found.add(`${niv.toUpperCase()} ${g} - ${s}`);
+            }
+          }
+        }
+
+        const sorted = Array.from(found).sort((a, b) => {
+          const isA_Prim = a.includes("PRIMARIA");
+          const isB_Prim = b.includes("PRIMARIA");
+          if (isA_Prim && !isB_Prim) return -1;
+          if (!isA_Prim && isB_Prim) return 1;
+          const gA = parseInt(a.match(/(\d+)°?/)?.[1] || "0");
+          const gB = parseInt(b.match(/(\d+)°?/)?.[1] || "0");
+          if (gA !== gB) return gA - gB;
+          const sA = a.match(/-\s*([A-Z])/)?.[1] || "";
+          const sB = b.match(/-\s*([A-Z])/)?.[1] || "";
+          return sA.localeCompare(sB);
+        });
+
+        setDetectedClassrooms(sorted);
+        if (sorted.length > 0 && !selectedClassroom) {
+          setSelectedClassroom(sorted[0]);
+        }
+      }
+    } catch (e) {
+      console.warn("Aviso al detectar aulas:", e);
+    }
+  };
+
+  // 7.2 Descargar Padrón por Estudiantes organizado por libros / hojas según Grado y Sección
+  const handleExportStudentsByClassroom = async (mode: "all" | "primaria" | "secundaria" | "specific", specificSheet?: string) => {
+    try {
+      setExportingStudents(true);
+      setMessage(null);
+
+      const res = await getAllApoderadosForExportAction();
+      if (!res.data || res.data.length === 0) {
+        setMessage({ type: "error", text: "No hay registros de apoderados en la base de datos para exportar." });
+        return;
+      }
+
+      const allApoderados = res.data;
+
+      // Consolidar apoderados por familia
+      const familyMap = new Map<string, {
+        familia_id: string;
+        padre: any | null;
+        madre: any | null;
+        apoderadoOtro: any | null;
+        ya_voto: boolean;
+        voto_emitido_por: string | null;
+        hijos: string;
+        nivel: string;
+        grado: string;
+        seccion: string;
+      }>();
+
+      for (const ap of allApoderados) {
+        const famId = ap.familia_id || `FAM-${ap.dni}`;
+        if (!familyMap.has(famId)) {
+          familyMap.set(famId, {
+            familia_id: famId,
+            padre: null,
+            madre: null,
+            apoderadoOtro: null,
+            ya_voto: false,
+            voto_emitido_por: null,
+            hijos: ap.hijos || "",
+            nivel: ap.nivel || "primaria",
+            grado: ap.grado || "",
+            seccion: ap.seccion || "",
+          });
+        }
+
+        const fam = familyMap.get(famId)!;
+        if (ap.ya_voto) {
+          fam.ya_voto = true;
+          if (ap.voto_emitido_por) fam.voto_emitido_por = ap.voto_emitido_por;
+        }
+
+        const parentescoStr = (ap.parentesco || "").toUpperCase();
+        if (parentescoStr.includes("PADRE") || parentescoStr.includes("PAPÁ")) {
+          fam.padre = ap;
+        } else if (parentescoStr.includes("MADRE") || parentescoStr.includes("MAMÁ")) {
+          fam.madre = ap;
+        } else {
+          if (!fam.apoderadoOtro) fam.apoderadoOtro = ap;
+        }
+
+        if (ap.hijos && ap.hijos.length > fam.hijos.length) {
+          fam.hijos = ap.hijos;
+        }
+      }
+
+      // Parser de cada estudiante en el string de hijos
+      const parseHijoItem = (itemStr: string) => {
+        const clean = itemStr.trim();
+        if (!clean) return null;
+
+        const regex = /^(.*?)\s*\(\s*([1-6])\s*(?:°|º)?\s*["“”]?\s*([A-Z])\s*["“”]?\s*(primaria|secundaria|inicial)?\s*\)$/i;
+        const match = clean.match(regex);
+
+        let rawNombre = clean;
+        let grado = "";
+        let seccion = "";
+        let nivel = "";
+
+        if (match) {
+          rawNombre = match[1].trim();
+          grado = `${match[2]}°`;
+          seccion = match[3].toUpperCase();
+          nivel = match[4] ? match[4].toLowerCase() : "";
+        } else {
+          const parenMatch = clean.match(/^(.*?)\s*\((.*?)\)$/);
+          if (parenMatch) {
+            rawNombre = parenMatch[1].trim();
+            const inside = parenMatch[2].toUpperCase();
+            const gMatch = inside.match(/\b([1-6])\s*(?:°|º)?/);
+            if (gMatch) grado = `${gMatch[1]}°`;
+            const sMatch = inside.match(/\b([A-Z])\b/);
+            if (sMatch) seccion = sMatch[1];
+            if (inside.includes("SEC")) nivel = "secundaria";
+            else if (inside.includes("PRIM")) nivel = "primaria";
+            else if (inside.includes("INIC")) nivel = "inicial";
+          }
+        }
+
+        let dniEstudiante = "";
+        let nombreEstudiante = rawNombre;
+
+        const dniPrefixMatch = rawNombre.match(/^([0-9]{7,9})\s*[-–]\s*(.+)$/);
+        if (dniPrefixMatch) {
+          dniEstudiante = dniPrefixMatch[1];
+          nombreEstudiante = dniPrefixMatch[2].trim();
+        } else {
+          const dniMatch = rawNombre.match(/^([0-9]{7,14})\s+(.+)$/);
+          if (dniMatch) {
+            dniEstudiante = dniMatch[1].slice(-8);
+            nombreEstudiante = dniMatch[2].trim();
+          }
+        }
+
+        return {
+          nombreEstudiante,
+          dniEstudiante,
+          grado,
+          seccion,
+          nivel,
+        };
+      };
+
+      // Desglosar por estudiantes y agrupar por aula
+      const sheetsMap = new Map<string, any[]>();
+
+      for (const fam of familyMap.values()) {
+        const rawHijosList = (fam.hijos || "")
+          .split(";")
+          .map(h => h.trim())
+          .filter(Boolean);
+
+        if (rawHijosList.length === 0) {
+          rawHijosList.push(`Estudiante de Familia ${fam.familia_id} (${fam.grado || "1°"} "${fam.seccion || "A"}" ${fam.nivel || "primaria"})`);
+        }
+
+        const seenChildrenInFamily = new Set<string>();
+
+        for (const hStr of rawHijosList) {
+          const parsed = parseHijoItem(hStr);
+          if (!parsed) continue;
+
+          const normName = parsed.nombreEstudiante.toUpperCase();
+          const stGrado = parsed.grado || fam.grado?.split(",")[0]?.trim() || "1°";
+          const stSeccion = parsed.seccion || fam.seccion?.split(",")[0]?.trim() || "A";
+          let stNivel = (parsed.nivel || fam.nivel || "primaria").toLowerCase();
+          if (stNivel === "mixto") {
+            stNivel = parseInt(stGrado) >= 1 && parseInt(stGrado) <= 5 && hStr.toLowerCase().includes("sec") ? "secundaria" : "primaria";
+          }
+
+          const uniqueChildKey = `${normName}_${stGrado}_${stSeccion}_${stNivel}`;
+          if (seenChildrenInFamily.has(uniqueChildKey)) continue;
+          seenChildrenInFamily.add(uniqueChildKey);
+
+          const sheetKey = `${stNivel.toUpperCase()} ${stGrado} - ${stSeccion}`;
+
+          if (mode === "primaria" && !sheetKey.startsWith("PRIMARIA")) continue;
+          if (mode === "secundaria" && !sheetKey.startsWith("SECUNDARIA")) continue;
+          if (mode === "specific" && specificSheet && sheetKey !== specificSheet) continue;
+
+          const row = {
+            nivel: stNivel.toUpperCase(),
+            grado: stGrado,
+            seccion: stSeccion,
+            estudiante: parsed.nombreEstudiante,
+            dniEstudiante: parsed.dniEstudiante || "-",
+            padreNombre: fam.padre ? `${fam.padre.apellidos}, ${fam.padre.nombres}` : (fam.apoderadoOtro ? `${fam.apoderadoOtro.apellidos}, ${fam.apoderadoOtro.nombres}` : "-"),
+            padreDni: fam.padre ? fam.padre.dni : (fam.apoderadoOtro ? fam.apoderadoOtro.dni : "-"),
+            madreNombre: fam.madre ? `${fam.madre.apellidos}, ${fam.madre.nombres}` : "-",
+            madreDni: fam.madre ? fam.madre.dni : "-",
+            familiaId: fam.familia_id,
+            yaVoto: fam.ya_voto ? "SÍ" : "NO",
+            detalleVoto: fam.voto_emitido_por || (fam.ya_voto ? "Voto registrado" : "Pendiente"),
+          };
+
+          if (!sheetsMap.has(sheetKey)) {
+            sheetsMap.set(sheetKey, []);
+          }
+          sheetsMap.get(sheetKey)!.push(row);
+        }
+      }
+
+      if (sheetsMap.size === 0) {
+        setMessage({ type: "error", text: "No se encontraron estudiantes para los filtros seleccionados." });
+        return;
+      }
+
+      // Ordenar las aulas: Primaria primero, luego Secundaria
+      const sortedSheetKeys = Array.from(sheetsMap.keys()).sort((a, b) => {
+        const isA_Prim = a.includes("PRIMARIA");
+        const isB_Prim = b.includes("PRIMARIA");
+        if (isA_Prim && !isB_Prim) return -1;
+        if (!isA_Prim && isB_Prim) return 1;
+
+        const gA = parseInt(a.match(/(\d+)°?/)?.[1] || "0");
+        const gB = parseInt(b.match(/(\d+)°?/)?.[1] || "0");
+        if (gA !== gB) return gA - gB;
+
+        const sA = a.match(/-\s*([A-Z])/)?.[1] || "";
+        const sB = b.match(/-\s*([A-Z])/)?.[1] || "";
+        return sA.localeCompare(sB);
+      });
+
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "Sistema de Votación Escolar - APAFA";
+      workbook.created = new Date();
+
+      // Hoja de RESUMEN DE AULAS (si hay más de 1 aula)
+      if (sortedSheetKeys.length > 1) {
+        const wsResumen = workbook.addWorksheet("RESUMEN DE AULAS");
+
+        wsResumen.columns = [
+          { header: "NIVEL", key: "nivel", width: 14 },
+          { header: "GRADO", key: "grado", width: 10 },
+          { header: "SECCIÓN", key: "seccion", width: 10 },
+          { header: "TOTAL ESTUDIANTES", key: "total", width: 22 },
+          { header: "FAMILIAS QUE VOTARON (SÍ)", key: "voted", width: 26 },
+          { header: "PENDIENTES (NO)", key: "pending", width: 18 },
+          { header: "% PARTICIPACIÓN", key: "pct", width: 18 }
+        ];
+
+        const headerRow = wsResumen.getRow(1);
+        headerRow.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+        headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E293B" } };
+        headerRow.alignment = { vertical: "middle", horizontal: "center" };
+        headerRow.height = 28;
+
+        let totalEstudiantesSum = 0;
+        let totalVotaronSum = 0;
+
+        for (const sKey of sortedSheetKeys) {
+          const list = sheetsMap.get(sKey)!;
+          const votedCount = list.filter(r => r.yaVoto === "SÍ").length;
+          const pendingCount = list.length - votedCount;
+          const pct = list.length > 0 ? ((votedCount / list.length) * 100).toFixed(1) + "%" : "0%";
+
+          totalEstudiantesSum += list.length;
+          totalVotaronSum += votedCount;
+
+          const matchGrado = sKey.match(/(\d+°?)/);
+          const matchSec = sKey.match(/-\s*([A-Z])/);
+          const nivStr = sKey.includes("PRIMARIA") ? "PRIMARIA" : "SECUNDARIA";
+
+          const row = wsResumen.addRow({
+            nivel: nivStr,
+            grado: matchGrado ? matchGrado[1] : "",
+            seccion: matchSec ? matchSec[1] : "",
+            total: list.length,
+            voted: votedCount,
+            pending: pendingCount,
+            pct: pct
+          });
+
+          row.alignment = { vertical: "middle", horizontal: "center" };
+          row.height = 20;
+
+          row.eachCell((cell) => {
+            cell.border = {
+              top: { style: "thin", color: { argb: "FFE2E8F0" } },
+              bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
+              left: { style: "thin", color: { argb: "FFE2E8F0" } },
+              right: { style: "thin", color: { argb: "FFE2E8F0" } },
+            };
+          });
+        }
+
+        const totalPendingSum = totalEstudiantesSum - totalVotaronSum;
+        const totalPctSum = totalEstudiantesSum > 0 ? ((totalVotaronSum / totalEstudiantesSum) * 100).toFixed(1) + "%" : "0%";
+
+        const totalRow = wsResumen.addRow({
+          nivel: "TOTAL GENERAL",
+          grado: "-",
+          seccion: "-",
+          total: totalEstudiantesSum,
+          voted: totalVotaronSum,
+          pending: totalPendingSum,
+          pct: totalPctSum
+        });
+
+        totalRow.font = { bold: true, size: 11, color: { argb: "FF0F172A" } };
+        totalRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } };
+        totalRow.alignment = { vertical: "middle", horizontal: "center" };
+        totalRow.height = 24;
+        totalRow.eachCell((cell) => {
+          cell.border = {
+            top: { style: "medium", color: { argb: "FF0F172A" } },
+            bottom: { style: "double", color: { argb: "FF0F172A" } },
+            left: { style: "thin", color: { argb: "FFE2E8F0" } },
+            right: { style: "thin", color: { argb: "FFE2E8F0" } },
+          };
+        });
+      }
+
+      // Hojas individuales para cada Aula
+      for (const sKey of sortedSheetKeys) {
+        const studentList = sheetsMap.get(sKey)!;
+        studentList.sort((a, b) => a.estudiante.localeCompare(b.estudiante, "es", { sensitivity: "base" }));
+
+        const sheetTitle = sKey.replace(/[\\/?*[\]]/g, "-").slice(0, 31);
+        const ws = workbook.addWorksheet(sheetTitle);
+
+        ws.columns = [
+          { header: "ITEM", key: "item", width: 8 },
+          { header: "DNI ESTUDIANTE", key: "dniEstudiante", width: 16 },
+          { header: "APELLIDOS Y NOMBRES DEL ESTUDIANTE", key: "estudiante", width: 38 },
+          { header: "APELLIDOS Y NOMBRES DEL PADRE", key: "padreNombre", width: 32 },
+          { header: "DNI PADRE", key: "padreDni", width: 14 },
+          { header: "APELLIDOS Y NOMBRES DE LA MADRE", key: "madreNombre", width: 32 },
+          { header: "DNI MADRE", key: "madreDni", width: 14 },
+          { header: "CÓDIGO FAMILIA", key: "familiaId", width: 22 },
+          { header: "¿YA VOTÓ?", key: "yaVoto", width: 14 },
+          { header: "DETALLE DEL VOTO", key: "detalleVoto", width: 40 }
+        ];
+
+        const headerRow = ws.getRow(1);
+        headerRow.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+        headerRow.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: sKey.includes("PRIMARIA") ? "FF1E3A8A" : "FF7C2D12" }
+        };
+        headerRow.alignment = { vertical: "middle", horizontal: "center" };
+        headerRow.height = 26;
+
+        studentList.forEach((st, idx) => {
+          const row = ws.addRow({
+            item: idx + 1,
+            dniEstudiante: st.dniEstudiante,
+            estudiante: st.estudiante,
+            padreNombre: st.padreNombre,
+            padreDni: st.padreDni,
+            madreNombre: st.madreNombre,
+            madreDni: st.madreDni,
+            familiaId: st.familiaId,
+            yaVoto: st.yaVoto,
+            detalleVoto: st.detalleVoto,
+          });
+
+          row.height = 20;
+          row.alignment = { vertical: "middle" };
+
+          row.getCell("item").alignment = { vertical: "middle", horizontal: "center" };
+          row.getCell("dniEstudiante").alignment = { vertical: "middle", horizontal: "center" };
+          row.getCell("padreDni").alignment = { vertical: "middle", horizontal: "center" };
+          row.getCell("madreDni").alignment = { vertical: "middle", horizontal: "center" };
+          row.getCell("familiaId").alignment = { vertical: "middle", horizontal: "center" };
+          row.getCell("yaVoto").alignment = { vertical: "middle", horizontal: "center" };
+
+          const cellVoto = row.getCell("yaVoto");
+          if (st.yaVoto === "SÍ") {
+            cellVoto.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCFCE7" } };
+            cellVoto.font = { bold: true, color: { argb: "FF166534" } };
+          } else {
+            cellVoto.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEE2E2" } };
+            cellVoto.font = { bold: true, color: { argb: "FF991B1B" } };
+          }
+
+          row.eachCell((cell) => {
+            cell.border = {
+              top: { style: "thin", color: { argb: "FFE2E8F0" } },
+              bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
+              left: { style: "thin", color: { argb: "FFE2E8F0" } },
+              right: { style: "thin", color: { argb: "FFE2E8F0" } },
+            };
+          });
+        });
+      }
+
+      let filename = "padron_apafa_por_aulas_completo_2026.xlsx";
+      if (mode === "primaria") filename = "padron_apafa_primaria_por_aulas_2026.xlsx";
+      else if (mode === "secundaria") filename = "padron_apafa_secundaria_por_aulas_2026.xlsx";
+      else if (mode === "specific" && specificSheet) {
+        filename = `padron_apafa_${specificSheet.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_2026.xlsx`;
+      }
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      saveAs(blob, filename);
+
+      setMessage({ type: "success", text: `¡Padrón de estudiantes descargado con éxito (${filename})!` });
+      setShowStudentExportModal(false);
+    } catch (err: any) {
+      setMessage({ type: "error", text: err.message || "Error al exportar los datos por estudiante." });
+    } finally {
+      setExportingStudents(false);
+    }
+  };
+
+  // 7.3 Descargar Formato Modelo de Excel para APAFA
   const handleDownloadTemplate = async () => {
     try {
       const workbook = new ExcelJS.Workbook();
@@ -2019,11 +2459,21 @@ export default function ApafaAdminView({
                 {isUploading ? "Procesando Excel..." : "Subir Padrón APAFA (Excel Primaria / Secundaria)"}
               </button>
               <button
+                type="button"
+                onClick={openStudentExportModal}
+                disabled={loading || exportingStudents}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+                title="Descargar padrón y resultado de votos por estudiante organizado por grado y sección"
+              >
+                {exportingStudents ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+                Descargar por Estudiante (Aulas/Libros)
+              </button>
+              <button
                 onClick={handleDownloadPadron}
                 disabled={loading}
                 className="border border-border hover:bg-secondary px-4 py-2.5 rounded-xl font-semibold text-sm flex items-center gap-2 transition-all"
               >
-                <Download className="w-4 h-4" /> Descargar Padrón
+                <Download className="w-4 h-4" /> Descargar Padrón General
               </button>
               <button
                 onClick={handleDownloadTemplate}
@@ -2201,13 +2651,25 @@ export default function ApafaAdminView({
               <h3 className="text-xl font-bold">Progreso Electoral de APAFA</h3>
               <p className="text-sm text-muted-foreground">Resultados y participación familiar en tiempo real.</p>
             </div>
-            <button
-              onClick={loadProgreso}
-              disabled={progresoLoading}
-              className="px-4 py-2 rounded-xl text-sm font-semibold bg-secondary hover:bg-secondary/80 flex items-center gap-2"
-            >
-              <RefreshCw className={`w-4 h-4 ${progresoLoading ? "animate-spin" : ""}`} /> Actualizar
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={openStudentExportModal}
+                disabled={exportingStudents}
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2 transition-all shadow-sm cursor-pointer disabled:opacity-50"
+                title="Descargar libro Excel con resultados de votación por estudiante y aula"
+              >
+                {exportingStudents ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+                Exportar Votos por Estudiante
+              </button>
+              <button
+                onClick={loadProgreso}
+                disabled={progresoLoading}
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-secondary hover:bg-secondary/80 flex items-center gap-2"
+              >
+                <RefreshCw className={`w-4 h-4 ${progresoLoading ? "animate-spin" : ""}`} /> Actualizar
+              </button>
+            </div>
           </div>
 
           {!progresoData?.election ? (
@@ -2804,6 +3266,163 @@ export default function ApafaAdminView({
                   )}
                 </button>
               </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Descarga de Padrón por Estudiante (por Libros / Aulas) */}
+      {showStudentExportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-background/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
+          <div className="bg-card text-card-foreground border border-border w-full max-w-2xl rounded-3xl p-6 sm:p-8 shadow-2xl scale-100 animate-in zoom-in-95 duration-200 my-auto">
+            
+            {/* Header del modal */}
+            <div className="flex items-start justify-between border-b border-border pb-4 mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                  <FileSpreadsheet className="w-7 h-7 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-foreground">
+                    Descargar Padrón por Estudiante
+                  </h3>
+                  <p className="text-xs text-muted-foreground font-medium mt-0.5">
+                    Genera libros Excel organizados por grado y sección con el estudiante, ambos padres y el estado del voto.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowStudentExportModal(false)}
+                disabled={exportingStudents}
+                className="p-1.5 rounded-xl text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+                title="Cerrar ventana"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Opciones de descarga */}
+            <div className="space-y-4">
+              
+              {/* Opción 1: Libro Completo */}
+              <div className="p-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10 transition-colors flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 text-[10px] font-black uppercase rounded bg-emerald-600 text-white">Recomendado</span>
+                    <h4 className="font-bold text-base text-foreground">Libro Completo (Todas las Aulas + Resumen)</h4>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Incluye una hoja de resumen general con porcentajes de participación y una pestaña independiente por cada aula de Primaria y Secundaria.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleExportStudentsByClassroom("all")}
+                  disabled={exportingStudents}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-2 transition-all shadow-sm shrink-0 cursor-pointer disabled:opacity-50"
+                >
+                  {exportingStudents ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  {exportingStudents ? "Generando..." : "Descargar Completo"}
+                </button>
+              </div>
+
+              {/* Opciones por Nivel */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                
+                {/* Primaria */}
+                <div className="p-4 rounded-2xl border border-border bg-secondary/30 flex flex-col justify-between gap-3">
+                  <div className="space-y-1">
+                    <h5 className="font-bold text-sm text-foreground">Solo Primaria</h5>
+                    <p className="text-xs text-muted-foreground">
+                      Todas las secciones de 1° a 6° de Primaria en pestañas individuales con su resumen.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleExportStudentsByClassroom("primaria")}
+                    disabled={exportingStudents}
+                    className="w-full py-2.5 rounded-xl text-xs font-bold border border-border hover:bg-secondary text-foreground flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {exportingStudents ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    Descargar Primaria
+                  </button>
+                </div>
+
+                {/* Secundaria */}
+                <div className="p-4 rounded-2xl border border-border bg-secondary/30 flex flex-col justify-between gap-3">
+                  <div className="space-y-1">
+                    <h5 className="font-bold text-sm text-foreground">Solo Secundaria</h5>
+                    <p className="text-xs text-muted-foreground">
+                      Todas las secciones de 1° a 5° de Secundaria en pestañas individuales con su resumen.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleExportStudentsByClassroom("secundaria")}
+                    disabled={exportingStudents}
+                    className="w-full py-2.5 rounded-xl text-xs font-bold border border-border hover:bg-secondary text-foreground flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {exportingStudents ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    Descargar Secundaria
+                  </button>
+                </div>
+
+              </div>
+
+              {/* Opción 3: Aula Específica */}
+              <div className="p-4 rounded-2xl border border-border bg-secondary/20 space-y-3">
+                <div className="space-y-0.5">
+                  <h5 className="font-bold text-sm text-foreground">Descargar un Aula Específica</h5>
+                  <p className="text-xs text-muted-foreground">
+                    Selecciona una sección en particular si requieres únicamente su hoja de firmas o padrón electoral.
+                  </p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <select
+                    value={selectedClassroom}
+                    onChange={(e) => setSelectedClassroom(e.target.value)}
+                    disabled={exportingStudents}
+                    className="flex-1 px-3 py-2 text-xs font-semibold rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">-- Selecciona un Aula / Sección --</option>
+                    {detectedClassrooms.map((cls) => (
+                      <option key={cls} value={cls}>
+                        {cls}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!selectedClassroom) {
+                        setMessage({ type: "error", text: "Por favor selecciona un aula primero." });
+                        return;
+                      }
+                      handleExportStudentsByClassroom("specific", selectedClassroom);
+                    }}
+                    disabled={exportingStudents || !selectedClassroom}
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-40"
+                  >
+                    {exportingStudents ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    Descargar Aula
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Footer */}
+            <div className="mt-6 pt-4 border-t border-border flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowStudentExportModal(false)}
+                disabled={exportingStudents}
+                className="px-5 py-2.5 rounded-xl text-xs font-semibold border border-border hover:bg-secondary transition-colors cursor-pointer"
+              >
+                Cerrar
+              </button>
             </div>
 
           </div>

@@ -1051,6 +1051,34 @@ export async function getPadronApafaAction(params: {
   }
 }
 
+export async function getAllApoderadosForExportAction() {
+  try {
+    await ensureSuperAdmin();
+
+    const allApoderados: any[] = [];
+    let from = 0;
+    const step = 1000;
+
+    while (true) {
+      const { data, error } = await supabaseAdmin
+        .from("apoderados")
+        .select("id, dni, nombres, apellidos, parentesco, familia_id, hijos, nivel, grado, seccion, ya_voto, voto_emitido_por")
+        .range(from, from + step - 1);
+
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+
+      allApoderados.push(...data);
+      if (data.length < step) break;
+      from += step;
+    }
+
+    return { success: true, data: allApoderados };
+  } catch (err: any) {
+    return { error: err.message || "Error al obtener el padrón de apoderados para exportar." };
+  }
+}
+
 export async function getFamilyDetailsAction(familiaId: string) {
   try {
     if (!familiaId) return { error: "ID de familia no proporcionado.", members: [] };
