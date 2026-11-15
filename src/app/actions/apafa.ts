@@ -1005,7 +1005,6 @@ export async function uploadPadronApafaAction(apoderadosList: any[]) {
 
       return {
         ...ap,
-        id: existing?.id, // Mantener el mismo UUID en la base de datos si ya existía
         familia_id: familiaId,
         hijos,
         grado,
