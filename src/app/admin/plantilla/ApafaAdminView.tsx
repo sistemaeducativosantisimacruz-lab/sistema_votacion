@@ -23,7 +23,10 @@ import {
   searchApoderadosAction,
   saveSingleApafaPartyAction,
   generateMockVotesApafaAction,
-  registerManualApoderadoAction
+  registerManualApoderadoAction,
+  getFamilyDetailsAction,
+  saveFamilyApoderadosAction,
+  deleteApoderadoAction
 } from "@/app/actions/apafa";
 import { parseApafaWorkbook, parseApafaWorkbooks } from "@/lib/apafaExcelParser";
 
@@ -85,6 +88,53 @@ export default function ApafaAdminView({
   // Modales
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [isGeneratingMock, setIsGeneratingMock] = useState(false);
+
+  // Estados para Modal Añadir / Editar Miembros de Familia (Padrón APAFA)
+  const [showFamilyModal, setShowFamilyModal] = useState(false);
+  const [isEditingFamily, setIsEditingFamily] = useState(false);
+  const [familyLoading, setFamilyLoading] = useState(false);
+  const [savingFamily, setSavingFamily] = useState(false);
+
+  const [familyForm, setFamilyForm] = useState<{
+    familiaId?: string;
+    hijos: string;
+    nivel: string;
+    grado: string;
+    seccion: string;
+    padre: {
+      id?: string;
+      dni: string;
+      nombres: string;
+      apellidos: string;
+      parentesco: string;
+    };
+    madre: {
+      id?: string;
+      dni: string;
+      nombres: string;
+      apellidos: string;
+      parentesco: string;
+    };
+    deletedMemberIds: string[];
+  }>({
+    hijos: "",
+    nivel: "primaria",
+    grado: "1°",
+    seccion: "A",
+    padre: { dni: "", nombres: "", apellidos: "", parentesco: "PADRE" },
+    madre: { dni: "", nombres: "", apellidos: "", parentesco: "MADRE" },
+    deletedMemberIds: []
+  });
+
+  const [padreSearchQuery, setPadreSearchQuery] = useState("");
+  const [padreSearchResults, setPadreSearchResults] = useState<any[]>([]);
+  const [isSearchingPadre, setIsSearchingPadre] = useState(false);
+  const [showPadreResults, setShowPadreResults] = useState(false);
+
+  const [madreSearchQuery, setMadreSearchQuery] = useState("");
+  const [madreSearchResults, setMadreSearchResults] = useState<any[]>([]);
+  const [isSearchingMadre, setIsSearchingMadre] = useState(false);
+  const [showMadreResults, setShowMadreResults] = useState(false);
 
   // 1. Cargar datos de la plantilla APAFA
   const loadPlantillaData = async () => {
@@ -722,6 +772,327 @@ export default function ApafaAdminView({
       console.error(err);
     } finally {
       setPadronLoading(false);
+    }
+  };
+
+  // 5.1 Gestión de Familia (Añadir / Editar Miembros en Padrón)
+  const handleOpenNewFamilyModal = () => {
+    setIsEditingFamily(false);
+    setFamilyForm({
+      familiaId: undefined,
+      hijos: "",
+      nivel: "primaria",
+      grado: "1°",
+      seccion: "A",
+      padre: { dni: "", nombres: "", apellidos: "", parentesco: "PADRE" },
+      madre: { dni: "", nombres: "", apellidos: "", parentesco: "MADRE" },
+      deletedMemberIds: []
+    });
+    setPadreSearchQuery("");
+    setPadreSearchResults([]);
+    setShowPadreResults(false);
+    setMadreSearchQuery("");
+    setMadreSearchResults([]);
+    setShowMadreResults(false);
+    setShowFamilyModal(true);
+  };
+
+  const handleOpenEditFamilyModal = async (ap: any) => {
+    setIsEditingFamily(true);
+    setShowFamilyModal(true);
+    setFamilyLoading(true);
+
+    setPadreSearchQuery("");
+    setPadreSearchResults([]);
+    setShowPadreResults(false);
+    setMadreSearchQuery("");
+    setMadreSearchResults([]);
+    setShowMadreResults(false);
+
+    try {
+      const res = await getFamilyDetailsAction(ap.familia_id);
+      const members = res?.members || [];
+
+      const pMember = members.find((m: any) => m.parentesco === "PADRE") || 
+        (ap.parentesco === "PADRE" ? ap : null);
+      const mMember = members.find((m: any) => m.parentesco === "MADRE") || 
+        (ap.parentesco === "MADRE" ? ap : null);
+      const otherMember = members.find((m: any) => m.parentesco !== "PADRE" && m.parentesco !== "MADRE");
+
+      setFamilyForm({
+        familiaId: ap.familia_id,
+        hijos: ap.hijos || pMember?.hijos || mMember?.hijos || "",
+        nivel: ap.nivel || pMember?.nivel || mMember?.nivel || "primaria",
+        grado: ap.grado || pMember?.grado || mMember?.grado || "1°",
+        seccion: ap.seccion || pMember?.seccion || mMember?.seccion || "A",
+        padre: pMember ? {
+          id: pMember.id,
+          dni: pMember.dni || "",
+          nombres: pMember.nombres || "",
+          apellidos: pMember.apellidos || "",
+          parentesco: pMember.parentesco || "PADRE"
+        } : (!mMember && otherMember ? {
+          id: otherMember.id,
+          dni: otherMember.dni || "",
+          nombres: otherMember.nombres || "",
+          apellidos: otherMember.apellidos || "",
+          parentesco: otherMember.parentesco || "PADRE"
+        } : { dni: "", nombres: "", apellidos: "", parentesco: "PADRE" }),
+        madre: mMember ? {
+          id: mMember.id,
+          dni: mMember.dni || "",
+          nombres: mMember.nombres || "",
+          apellidos: mMember.apellidos || "",
+          parentesco: mMember.parentesco || "MADRE"
+        } : (pMember && otherMember ? {
+          id: otherMember.id,
+          dni: otherMember.dni || "",
+          nombres: otherMember.nombres || "",
+          apellidos: otherMember.apellidos || "",
+          parentesco: otherMember.parentesco || "MADRE"
+        } : { dni: "", nombres: "", apellidos: "", parentesco: "MADRE" }),
+        deletedMemberIds: []
+      });
+    } catch (err: any) {
+      console.error("Error al cargar detalles de la familia:", err);
+      setFamilyForm({
+        familiaId: ap.familia_id,
+        hijos: ap.hijos || "",
+        nivel: ap.nivel || "primaria",
+        grado: ap.grado || "1°",
+        seccion: ap.seccion || "A",
+        padre: ap.parentesco === "PADRE" ? {
+          id: ap.id,
+          dni: ap.dni || "",
+          nombres: ap.nombres || "",
+          apellidos: ap.apellidos || "",
+          parentesco: "PADRE"
+        } : { dni: "", nombres: "", apellidos: "", parentesco: "PADRE" },
+        madre: ap.parentesco === "MADRE" ? {
+          id: ap.id,
+          dni: ap.dni || "",
+          nombres: ap.nombres || "",
+          apellidos: ap.apellidos || "",
+          parentesco: "MADRE"
+        } : { dni: "", nombres: "", apellidos: "", parentesco: "MADRE" },
+        deletedMemberIds: []
+      });
+    } finally {
+      setFamilyLoading(false);
+    }
+  };
+
+  const handleSearchPadre = async (query: string) => {
+    setPadreSearchQuery(query);
+    if (!query.trim()) {
+      setPadreSearchResults([]);
+      setShowPadreResults(false);
+      return;
+    }
+    setIsSearchingPadre(true);
+    setShowPadreResults(true);
+    try {
+      const res = await searchApoderadosAction(query);
+      setPadreSearchResults(res?.data || []);
+    } catch (e) {
+      setPadreSearchResults([]);
+    } finally {
+      setIsSearchingPadre(false);
+    }
+  };
+
+  const handleSelectPadreFromSearch = async (ap: any) => {
+    setFamilyForm(prev => ({
+      ...prev,
+      padre: {
+        id: ap.id,
+        dni: ap.dni || "",
+        apellidos: ap.apellidos || "",
+        nombres: ap.nombres || "",
+        parentesco: ap.parentesco || "PADRE"
+      },
+      hijos: prev.hijos || ap.hijos || "",
+      nivel: prev.nivel || ap.nivel || "primaria",
+      grado: prev.grado || ap.grado || "1°",
+      seccion: prev.seccion || ap.seccion || "A",
+      familiaId: prev.familiaId || ap.familia_id || undefined
+    }));
+
+    if (ap.familia_id && !familyForm.madre.dni) {
+      try {
+        const famRes = await getFamilyDetailsAction(ap.familia_id);
+        const madreMember = (famRes?.members || []).find((m: any) => m.parentesco === "MADRE" || m.dni !== ap.dni);
+        if (madreMember && madreMember.dni !== ap.dni) {
+          setFamilyForm(prev => ({
+            ...prev,
+            madre: {
+              id: madreMember.id,
+              dni: madreMember.dni || "",
+              apellidos: madreMember.apellidos || "",
+              nombres: madreMember.nombres || "",
+              parentesco: madreMember.parentesco || "MADRE"
+            }
+          }));
+        }
+      } catch (err) {
+        // Ignore
+      }
+    }
+
+    setPadreSearchQuery("");
+    setShowPadreResults(false);
+  };
+
+  const handleClearPadre = () => {
+    setFamilyForm(prev => ({
+      ...prev,
+      deletedMemberIds: prev.padre.id ? [...prev.deletedMemberIds, prev.padre.id] : prev.deletedMemberIds,
+      padre: { dni: "", nombres: "", apellidos: "", parentesco: "PADRE" }
+    }));
+  };
+
+  const handleSearchMadre = async (query: string) => {
+    setMadreSearchQuery(query);
+    if (!query.trim()) {
+      setMadreSearchResults([]);
+      setShowMadreResults(false);
+      return;
+    }
+    setIsSearchingMadre(true);
+    setShowMadreResults(true);
+    try {
+      const res = await searchApoderadosAction(query);
+      setMadreSearchResults(res?.data || []);
+    } catch (e) {
+      setMadreSearchResults([]);
+    } finally {
+      setIsSearchingMadre(false);
+    }
+  };
+
+  const handleSelectMadreFromSearch = async (ap: any) => {
+    setFamilyForm(prev => ({
+      ...prev,
+      madre: {
+        id: ap.id,
+        dni: ap.dni || "",
+        apellidos: ap.apellidos || "",
+        nombres: ap.nombres || "",
+        parentesco: ap.parentesco || "MADRE"
+      },
+      hijos: prev.hijos || ap.hijos || "",
+      nivel: prev.nivel || ap.nivel || "primaria",
+      grado: prev.grado || ap.grado || "1°",
+      seccion: prev.seccion || ap.seccion || "A",
+      familiaId: prev.familiaId || ap.familia_id || undefined
+    }));
+
+    if (ap.familia_id && !familyForm.padre.dni) {
+      try {
+        const famRes = await getFamilyDetailsAction(ap.familia_id);
+        const padreMember = (famRes?.members || []).find((m: any) => m.parentesco === "PADRE" || m.dni !== ap.dni);
+        if (padreMember && padreMember.dni !== ap.dni) {
+          setFamilyForm(prev => ({
+            ...prev,
+            padre: {
+              id: padreMember.id,
+              dni: padreMember.dni || "",
+              apellidos: padreMember.apellidos || "",
+              nombres: padreMember.nombres || "",
+              parentesco: padreMember.parentesco || "PADRE"
+            }
+          }));
+        }
+      } catch (err) {
+        // Ignore
+      }
+    }
+
+    setMadreSearchQuery("");
+    setShowMadreResults(false);
+  };
+
+  const handleClearMadre = () => {
+    setFamilyForm(prev => ({
+      ...prev,
+      deletedMemberIds: prev.madre.id ? [...prev.deletedMemberIds, prev.madre.id] : prev.deletedMemberIds,
+      madre: { dni: "", nombres: "", apellidos: "", parentesco: "MADRE" }
+    }));
+  };
+
+  const handleSaveFamily = async () => {
+    if (!familyForm.hijos.trim()) {
+      alert("Debe ingresar los apellidos y nombres del estudiante o hijos representados.");
+      return;
+    }
+
+    const cleanDniPadre = familyForm.padre.dni.replace(/\D/g, "").slice(0, 8);
+    const cleanDniMadre = familyForm.madre.dni.replace(/\D/g, "").slice(0, 8);
+
+    const hasPadre = Boolean(cleanDniPadre && familyForm.padre.nombres.trim() && familyForm.padre.apellidos.trim());
+    const hasMadre = Boolean(cleanDniMadre && familyForm.madre.nombres.trim() && familyForm.madre.apellidos.trim());
+
+    if (!hasPadre && !hasMadre) {
+      alert("Debe completar los datos (DNI de 8 dígitos, nombres y apellidos) de al menos un apoderado (Padre o Madre).");
+      return;
+    }
+
+    if (hasPadre && cleanDniPadre.length !== 8) {
+      alert("El DNI del padre debe tener exactamente 8 dígitos numéricos.");
+      return;
+    }
+
+    if (hasMadre && cleanDniMadre.length !== 8) {
+      alert("El DNI de la madre debe tener exactamente 8 dígitos numéricos.");
+      return;
+    }
+
+    if (hasPadre && hasMadre && cleanDniPadre === cleanDniMadre) {
+      alert("El DNI del padre y de la madre no pueden ser iguales.");
+      return;
+    }
+
+    setSavingFamily(true);
+    try {
+      const res = await saveFamilyApoderadosAction({
+        familiaId: familyForm.familiaId,
+        hijos: familyForm.hijos.trim(),
+        nivel: familyForm.nivel,
+        grado: familyForm.grado.trim() || "1°",
+        seccion: familyForm.seccion.trim() || "A",
+        padre: hasPadre ? {
+          id: familyForm.padre.id,
+          dni: cleanDniPadre,
+          nombres: familyForm.padre.nombres.trim(),
+          apellidos: familyForm.padre.apellidos.trim(),
+          parentesco: familyForm.padre.parentesco || "PADRE"
+        } : null,
+        madre: hasMadre ? {
+          id: familyForm.madre.id,
+          dni: cleanDniMadre,
+          nombres: familyForm.madre.nombres.trim(),
+          apellidos: familyForm.madre.apellidos.trim(),
+          parentesco: familyForm.madre.parentesco || "MADRE"
+        } : null,
+        deletedMemberIds: familyForm.deletedMemberIds
+      });
+
+      if (res.error) {
+        throw new Error(res.error);
+      }
+
+      setMessage({
+        type: "success",
+        text: isEditingFamily 
+          ? "¡Datos de la familia y apoderados actualizados correctamente en el padrón!"
+          : "¡Nueva familia y miembros añadidos exitosamente al padrón!"
+      });
+      setShowFamilyModal(false);
+      loadPadron();
+    } catch (err: any) {
+      alert(`Error al guardar: ${err.message}`);
+    } finally {
+      setSavingFamily(false);
     }
   };
 
@@ -1633,6 +2004,13 @@ export default function ApafaAdminView({
                 onChange={handleFileUpload}
               />
               <button
+                type="button"
+                onClick={handleOpenNewFamilyModal}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+              >
+                <UserPlus className="w-4 h-4 stroke-[2.5]" /> Añadir Miembro de Familia
+              </button>
+              <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading}
                 className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm transition-all disabled:opacity-50"
@@ -1727,20 +2105,21 @@ export default function ApafaAdminView({
                     <th className="px-4 py-3">Hijo(s) Representado(s)</th>
                     <th className="px-4 py-3">Grado / Sec</th>
                     <th className="px-4 py-3">Estado Familiar</th>
+                    <th className="px-4 py-3 text-center">Acción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
                   {padronLoading ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-10">
+                      <td colSpan={7} className="text-center py-10">
                         <Loader2 className="w-6 h-6 animate-spin mx-auto text-amber-600 mb-2" />
                         <span className="text-xs text-muted-foreground">Cargando padrón...</span>
                       </td>
                     </tr>
                   ) : padronData.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-12 text-muted-foreground">
-                        No se encontraron registros en el padrón de APAFA. Sube un archivo Excel para comenzar.
+                      <td colSpan={7} className="text-center py-12 text-muted-foreground">
+                        No se encontraron registros en el padrón de APAFA. Sube un archivo Excel para comenzar o añade una familia manualmente.
                       </td>
                     </tr>
                   ) : (
@@ -1749,7 +2128,7 @@ export default function ApafaAdminView({
                         <td className="px-4 py-3 font-mono font-bold text-foreground">{a.dni}</td>
                         <td className="px-4 py-3 font-semibold">{a.apellidos}, {a.nombres}</td>
                         <td className="px-4 py-3">
-                          <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold uppercase ${a.parentesco === 'PADRE' ? 'bg-blue-500/10 text-blue-700' : 'bg-pink-500/10 text-pink-700'}`}>
+                          <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold uppercase ${a.parentesco === 'PADRE' ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300' : 'bg-pink-500/10 text-pink-700 dark:text-pink-300'}`}>
                             {a.parentesco}
                           </span>
                         </td>
@@ -1769,6 +2148,16 @@ export default function ApafaAdminView({
                               Pendiente
                             </span>
                           )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditFamilyModal(a)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-black text-black dark:text-white bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border-2 border-slate-900 dark:border-white transition-all inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+                            title="Editar datos de la familia, padres, grado y sección"
+                          >
+                            <Edit className="w-3.5 h-3.5 text-black dark:text-white stroke-[2.5]" /> Editar
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -1931,6 +2320,492 @@ export default function ApafaAdminView({
                 {loading ? "Limpiando..." : "Sí, Limpiar Votos"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Añadir / Editar Familia en Padrón APAFA */}
+      {showFamilyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-background/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
+          <div className="bg-card text-card-foreground border border-border w-full max-w-3xl rounded-3xl p-5 sm:p-7 shadow-2xl scale-100 animate-in zoom-in-95 duration-200 my-auto max-h-[92vh] flex flex-col">
+            
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-border pb-4 mb-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className={`p-2.5 rounded-2xl ${isEditingFamily ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'}`}>
+                  {isEditingFamily ? <Edit className="w-6 h-6 stroke-[2.5]" /> : <UserPlus className="w-6 h-6 stroke-[2.5]" />}
+                </div>
+                <div>
+                  <h3 className="text-lg sm:text-xl font-black text-foreground">
+                    {isEditingFamily ? "Editar Familia y Apoderados del Padrón" : "Añadir Miembro de Familia al Padrón"}
+                  </h3>
+                  <p className="text-xs text-muted-foreground font-medium mt-0.5">
+                    Permite registrar al padre, madre y los datos del estudiante para habilitar su voto oficial en APAFA.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFamilyModal(false)}
+                className="p-1.5 rounded-xl text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+                title="Cerrar ventana"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body (Scrollable) */}
+            <div className="overflow-y-auto pr-1 space-y-5 flex-1">
+              {familyLoading ? (
+                <div className="py-16 text-center text-muted-foreground flex flex-col items-center justify-center gap-2">
+                  <Loader2 className="w-8 h-8 animate-spin text-amber-600" />
+                  <span className="text-xs font-semibold">Cargando datos de la familia...</span>
+                </div>
+              ) : (
+                <>
+                  {/* SECCIÓN 1: DATOS DEL ESTUDIANTE A CARGO */}
+                  <div className="rounded-2xl border border-border bg-secondary/20 p-4 space-y-3.5">
+                    <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                      <span className="text-xs font-black uppercase tracking-wider text-foreground flex items-center gap-2">
+                        <Users className="w-4 h-4 text-amber-600" /> 1. Datos del Estudiante (Hijo a Cargo)
+                      </span>
+                      <span className="text-[11px] text-muted-foreground font-semibold">
+                        Requerido para asociar el grado y sección
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5">
+                      <div className="sm:col-span-12">
+                        <label className="text-xs font-bold text-foreground block mb-1">
+                          Apellidos y Nombres del Estudiante <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ej. BARRANZUELA PALACIOS, FERNANDO FABRICIO"
+                          value={familyForm.hijos}
+                          onChange={(e) => setFamilyForm(prev => ({ ...prev, hijos: e.target.value.toUpperCase() }))}
+                          className="w-full px-3.5 py-2 text-xs font-bold rounded-xl border border-border bg-background focus:border-amber-500 outline-none text-foreground placeholder:text-muted-foreground uppercase shadow-sm"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-4">
+                        <label className="text-xs font-bold text-foreground block mb-1">
+                          Nivel Educativo <span className="text-destructive">*</span>
+                        </label>
+                        <select
+                          value={familyForm.nivel}
+                          onChange={(e) => setFamilyForm(prev => ({ ...prev, nivel: e.target.value }))}
+                          className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-border bg-background focus:border-amber-500 outline-none text-foreground shadow-sm"
+                        >
+                          <option value="primaria">Primaria</option>
+                          <option value="secundaria">Secundaria</option>
+                          <option value="mixto">Mixto (Ambos Niveles)</option>
+                        </select>
+                      </div>
+
+                      <div className="sm:col-span-4">
+                        <label className="text-xs font-bold text-foreground block mb-1">
+                          Grado <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ej. 1°, 2°, 3°"
+                          value={familyForm.grado}
+                          onChange={(e) => setFamilyForm(prev => ({ ...prev, grado: e.target.value }))}
+                          className="w-full px-3.5 py-2 text-xs font-bold rounded-xl border border-border bg-background focus:border-amber-500 outline-none text-foreground placeholder:text-muted-foreground shadow-sm"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-4">
+                        <label className="text-xs font-bold text-foreground block mb-1">
+                          Sección <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ej. A, B, C, U"
+                          maxLength={5}
+                          value={familyForm.seccion}
+                          onChange={(e) => setFamilyForm(prev => ({ ...prev, seccion: e.target.value.toUpperCase() }))}
+                          className="w-full px-3.5 py-2 text-xs font-bold rounded-xl border border-border bg-background focus:border-amber-500 outline-none text-foreground placeholder:text-muted-foreground uppercase shadow-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SECCIÓN 2: DATOS DEL PADRE */}
+                  <div className="rounded-2xl border-2 border-blue-500/30 bg-blue-500/5 dark:bg-blue-950/20 p-4 space-y-3.5">
+                    <div className="flex items-center justify-between border-b border-blue-500/20 pb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-0.5 rounded-lg text-xs font-black uppercase tracking-wider bg-blue-600 text-white shadow-sm">
+                          PADRE
+                        </span>
+                        <span className="text-xs font-bold text-foreground">
+                          {familyForm.padre.dni ? "Apoderado Registrado / En edición" : "Opcional si solo vota la madre"}
+                        </span>
+                      </div>
+                      {(familyForm.padre.dni || familyForm.padre.nombres) && (
+                        <button
+                          type="button"
+                          onClick={handleClearPadre}
+                          className="text-xs text-muted-foreground hover:text-destructive flex items-center gap-1 font-semibold transition-colors cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" /> Limpiar padre
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Búsqueda de Padre */}
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-2.5 text-muted-foreground pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Buscar padre existente por DNI o Apellidos para autocompletar..."
+                        value={padreSearchQuery}
+                        onChange={(e) => handleSearchPadre(e.target.value)}
+                        onFocus={() => { if (padreSearchQuery.trim()) setShowPadreResults(true); }}
+                        className="w-full pl-9 pr-8 py-2 text-xs rounded-xl border border-border bg-background focus:border-blue-500 outline-none text-foreground placeholder:text-muted-foreground shadow-sm"
+                      />
+                      {isSearchingPadre ? (
+                        <Loader2 className="w-4 h-4 absolute right-2.5 top-2.5 text-blue-600 animate-spin" />
+                      ) : padreSearchQuery ? (
+                        <button
+                          type="button"
+                          onClick={() => { setPadreSearchQuery(""); setShowPadreResults(false); }}
+                          className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      ) : null}
+
+                      {/* Dropdown Resultados Búsqueda Padre */}
+                      {showPadreResults && (
+                        <div className="mt-2 rounded-xl border border-blue-500/40 bg-card p-2.5 space-y-2 shadow-lg animate-in fade-in">
+                          <div className="flex items-center justify-between px-1">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                              Resultados de búsqueda ({padreSearchResults.length})
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setShowPadreResults(false)}
+                              className="text-[11px] text-muted-foreground hover:text-foreground font-semibold"
+                            >
+                              Cerrar
+                            </button>
+                          </div>
+
+                          {padreSearchResults.length > 0 ? (
+                            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                              {padreSearchResults.map((ap: any) => (
+                                <div
+                                  key={ap.id}
+                                  className="p-2 rounded-lg border border-border/80 bg-background hover:border-blue-500/50 hover:bg-blue-500/5 transition-all flex items-center justify-between gap-3 text-xs"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="font-bold text-foreground truncate">
+                                      {ap.apellidos}, {ap.nombres}
+                                    </p>
+                                    <p className="text-[11px] text-muted-foreground font-mono">
+                                      DNI: {ap.dni} {ap.hijos ? `• Hijo: ${ap.hijos}` : ""}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSelectPadreFromSearch(ap)}
+                                    className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer shadow-sm"
+                                  >
+                                    <Check className="w-3 h-3" /> Seleccionar
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="py-2 px-1 text-xs text-muted-foreground">
+                              No se encontró apoderado con "{padreSearchQuery}".
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const clean = padreSearchQuery.trim();
+                              const isNum = /^\d+$/.test(clean);
+                              setFamilyForm(prev => ({
+                                ...prev,
+                                padre: {
+                                  ...prev.padre,
+                                  dni: isNum ? clean.slice(0, 8) : prev.padre.dni,
+                                  apellidos: !isNum && !prev.padre.apellidos ? clean.toUpperCase() : prev.padre.apellidos
+                                }
+                              }));
+                              setShowPadreResults(false);
+                            }}
+                            className="w-full text-left p-2 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 border border-dashed border-blue-400 text-blue-950 dark:text-blue-200 text-xs font-semibold flex items-center justify-between gap-2 transition-all cursor-pointer"
+                          >
+                            <span>Completar manualmente usando "{padreSearchQuery}"</span>
+                            <Plus className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Inputs Directos Padre */}
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                      <div className="sm:col-span-4">
+                        <label className="text-xs font-bold text-foreground block mb-1">
+                          DNI Padre (8 dígitos)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="8 dígitos"
+                          maxLength={8}
+                          value={familyForm.padre.dni}
+                          onChange={(e) => setFamilyForm(prev => ({
+                            ...prev,
+                            padre: { ...prev.padre, dni: e.target.value.replace(/\D/g, '').slice(0, 8) }
+                          }))}
+                          className="w-full px-3.5 py-2 text-xs font-bold font-mono rounded-xl border border-border bg-background focus:border-blue-500 outline-none text-foreground placeholder:text-muted-foreground shadow-sm"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-4">
+                        <label className="text-xs font-bold text-foreground block mb-1">
+                          Apellidos del Padre
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ej. PÉREZ GARCÍA"
+                          value={familyForm.padre.apellidos}
+                          onChange={(e) => setFamilyForm(prev => ({
+                            ...prev,
+                            padre: { ...prev.padre, apellidos: e.target.value.toUpperCase() }
+                          }))}
+                          className="w-full px-3.5 py-2 text-xs font-bold rounded-xl border border-border bg-background focus:border-blue-500 outline-none text-foreground placeholder:text-muted-foreground uppercase shadow-sm"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-4">
+                        <label className="text-xs font-bold text-foreground block mb-1">
+                          Nombres del Padre
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ej. JUAN CARLOS"
+                          value={familyForm.padre.nombres}
+                          onChange={(e) => setFamilyForm(prev => ({
+                            ...prev,
+                            padre: { ...prev.padre, nombres: e.target.value.toUpperCase() }
+                          }))}
+                          className="w-full px-3.5 py-2 text-xs font-bold rounded-xl border border-border bg-background focus:border-blue-500 outline-none text-foreground placeholder:text-muted-foreground uppercase shadow-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SECCIÓN 3: DATOS DE LA MADRE */}
+                  <div className="rounded-2xl border-2 border-pink-500/30 bg-pink-500/5 dark:bg-pink-950/20 p-4 space-y-3.5">
+                    <div className="flex items-center justify-between border-b border-pink-500/20 pb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-0.5 rounded-lg text-xs font-black uppercase tracking-wider bg-pink-600 text-white shadow-sm">
+                          MADRE / APODERADA
+                        </span>
+                        <span className="text-xs font-bold text-foreground">
+                          {familyForm.madre.dni ? "Apoderada Registrada / En edición" : "Opcional si solo vota el padre"}
+                        </span>
+                      </div>
+                      {(familyForm.madre.dni || familyForm.madre.nombres) && (
+                        <button
+                          type="button"
+                          onClick={handleClearMadre}
+                          className="text-xs text-muted-foreground hover:text-destructive flex items-center gap-1 font-semibold transition-colors cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" /> Limpiar madre
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Búsqueda de Madre */}
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-2.5 text-muted-foreground pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Buscar madre existente por DNI o Apellidos para autocompletar..."
+                        value={madreSearchQuery}
+                        onChange={(e) => handleSearchMadre(e.target.value)}
+                        onFocus={() => { if (madreSearchQuery.trim()) setShowMadreResults(true); }}
+                        className="w-full pl-9 pr-8 py-2 text-xs rounded-xl border border-border bg-background focus:border-pink-500 outline-none text-foreground placeholder:text-muted-foreground shadow-sm"
+                      />
+                      {isSearchingMadre ? (
+                        <Loader2 className="w-4 h-4 absolute right-2.5 top-2.5 text-pink-600 animate-spin" />
+                      ) : madreSearchQuery ? (
+                        <button
+                          type="button"
+                          onClick={() => { setMadreSearchQuery(""); setShowMadreResults(false); }}
+                          className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      ) : null}
+
+                      {/* Dropdown Resultados Búsqueda Madre */}
+                      {showMadreResults && (
+                        <div className="mt-2 rounded-xl border border-pink-500/40 bg-card p-2.5 space-y-2 shadow-lg animate-in fade-in">
+                          <div className="flex items-center justify-between px-1">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                              Resultados de búsqueda ({madreSearchResults.length})
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setShowMadreResults(false)}
+                              className="text-[11px] text-muted-foreground hover:text-foreground font-semibold"
+                            >
+                              Cerrar
+                            </button>
+                          </div>
+
+                          {madreSearchResults.length > 0 ? (
+                            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                              {madreSearchResults.map((ap: any) => (
+                                <div
+                                  key={ap.id}
+                                  className="p-2 rounded-lg border border-border/80 bg-background hover:border-pink-500/50 hover:bg-pink-500/5 transition-all flex items-center justify-between gap-3 text-xs"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="font-bold text-foreground truncate">
+                                      {ap.apellidos}, {ap.nombres}
+                                    </p>
+                                    <p className="text-[11px] text-muted-foreground font-mono">
+                                      DNI: {ap.dni} {ap.hijos ? `• Hijo: ${ap.hijos}` : ""}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSelectMadreFromSearch(ap)}
+                                    className="shrink-0 bg-pink-600 hover:bg-pink-700 text-white font-bold text-xs px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer shadow-sm"
+                                  >
+                                    <Check className="w-3 h-3" /> Seleccionar
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="py-2 px-1 text-xs text-muted-foreground">
+                              No se encontró apoderada con "{madreSearchQuery}".
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const clean = madreSearchQuery.trim();
+                              const isNum = /^\d+$/.test(clean);
+                              setFamilyForm(prev => ({
+                                ...prev,
+                                madre: {
+                                  ...prev.madre,
+                                  dni: isNum ? clean.slice(0, 8) : prev.madre.dni,
+                                  apellidos: !isNum && !prev.madre.apellidos ? clean.toUpperCase() : prev.madre.apellidos
+                                }
+                              }));
+                              setShowMadreResults(false);
+                            }}
+                            className="w-full text-left p-2 rounded-lg bg-pink-50 hover:bg-pink-100 dark:bg-pink-950/40 dark:hover:bg-pink-900/50 border border-dashed border-pink-400 text-pink-950 dark:text-pink-200 text-xs font-semibold flex items-center justify-between gap-2 transition-all cursor-pointer"
+                          >
+                            <span>Completar manualmente usando "{madreSearchQuery}"</span>
+                            <Plus className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Inputs Directos Madre */}
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                      <div className="sm:col-span-4">
+                        <label className="text-xs font-bold text-foreground block mb-1">
+                          DNI Madre (8 dígitos)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="8 dígitos"
+                          maxLength={8}
+                          value={familyForm.madre.dni}
+                          onChange={(e) => setFamilyForm(prev => ({
+                            ...prev,
+                            madre: { ...prev.madre, dni: e.target.value.replace(/\D/g, '').slice(0, 8) }
+                          }))}
+                          className="w-full px-3.5 py-2 text-xs font-bold font-mono rounded-xl border border-border bg-background focus:border-pink-500 outline-none text-foreground placeholder:text-muted-foreground shadow-sm"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-4">
+                        <label className="text-xs font-bold text-foreground block mb-1">
+                          Apellidos de la Madre
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ej. DOMÍNGUEZ ZETA"
+                          value={familyForm.madre.apellidos}
+                          onChange={(e) => setFamilyForm(prev => ({
+                            ...prev,
+                            madre: { ...prev.madre, apellidos: e.target.value.toUpperCase() }
+                          }))}
+                          className="w-full px-3.5 py-2 text-xs font-bold rounded-xl border border-border bg-background focus:border-pink-500 outline-none text-foreground placeholder:text-muted-foreground uppercase shadow-sm"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-4">
+                        <label className="text-xs font-bold text-foreground block mb-1">
+                          Nombres de la Madre
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ej. CARMEN ROSA"
+                          value={familyForm.madre.nombres}
+                          onChange={(e) => setFamilyForm(prev => ({
+                            ...prev,
+                            madre: { ...prev.madre, nombres: e.target.value.toUpperCase() }
+                          }))}
+                          className="w-full px-3.5 py-2 text-xs font-bold rounded-xl border border-border bg-background focus:border-pink-500 outline-none text-foreground placeholder:text-muted-foreground uppercase shadow-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between border-t border-border pt-4 mt-4 shrink-0 flex-wrap gap-2">
+              <span className="text-xs text-muted-foreground font-semibold">
+                * Con al menos un DNI registrado, la familia queda habilitada para votar.
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowFamilyModal(false)}
+                  disabled={savingFamily}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold border border-border hover:bg-secondary transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveFamily}
+                  disabled={savingFamily || familyLoading}
+                  className="px-5 py-2.5 rounded-xl text-xs font-black bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100 shadow-sm transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer"
+                >
+                  {savingFamily ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" /> Guardando en Padrón...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4 stroke-[2.5]" /> {isEditingFamily ? "Guardar Cambios" : "Guardar Familia en Padrón"}
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}

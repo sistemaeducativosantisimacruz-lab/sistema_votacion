@@ -204,7 +204,7 @@ export async function searchApoderadosAction(query: string) {
     if (/^\d+$/.test(cleanQuery)) {
       const { data, error } = await supabaseAdmin
         .from("apoderados")
-        .select("id, dni, nombres, apellidos, parentesco, hijos, grado, seccion, nivel")
+        .select("id, dni, nombres, apellidos, parentesco, hijos, grado, seccion, nivel, familia_id")
         .ilike("dni", `%${cleanQuery}%`)
         .order("apellidos", { ascending: true })
         .limit(12);
@@ -219,7 +219,7 @@ export async function searchApoderadosAction(query: string) {
       const term = words[0];
       const { data, error } = await supabaseAdmin
         .from("apoderados")
-        .select("id, dni, nombres, apellidos, parentesco, hijos, grado, seccion, nivel")
+        .select("id, dni, nombres, apellidos, parentesco, hijos, grado, seccion, nivel, familia_id")
         .or(`dni.ilike.%${term}%,nombres.ilike.%${term}%,apellidos.ilike.%${term}%`)
         .order("apellidos", { ascending: true })
         .limit(12);
@@ -231,7 +231,7 @@ export async function searchApoderadosAction(query: string) {
       const orConditions = words.map(w => `nombres.ilike.%${w}%,apellidos.ilike.%${w}%`).join(",");
       const { data, error } = await supabaseAdmin
         .from("apoderados")
-        .select("id, dni, nombres, apellidos, parentesco, hijos, grado, seccion, nivel")
+        .select("id, dni, nombres, apellidos, parentesco, hijos, grado, seccion, nivel, familia_id")
         .or(orConditions)
         .limit(30);
 
@@ -988,6 +988,200 @@ export async function getPadronApafaAction(params: {
     };
   } catch (err: any) {
     return { error: err.message };
+  }
+}
+
+export async function getFamilyDetailsAction(familiaId: string) {
+  try {
+    if (!familiaId) return { error: "ID de familia no proporcionado.", members: [] };
+    const { data, error } = await supabaseAdmin
+      .from("apoderados")
+      .select("id, dni, nombres, apellidos, parentesco, familia_id, hijos, nivel, grado, seccion, ya_voto, voto_emitido_por")
+      .eq("familia_id", familiaId)
+      .order("parentesco", { ascending: true });
+
+    if (error) throw error;
+    return { success: true, members: data || [] };
+  } catch (err: any) {
+    return { error: err.message || "Error al obtener datos de la familia.", members: [] };
+  }
+}
+
+export async function saveFamilyApoderadosAction(params: {
+  familiaId?: string;
+  hijos: string;
+  nivel: string;
+  grado: string;
+  seccion: string;
+  padre?: {
+    id?: string;
+    dni: string;
+    nombres: string;
+    apellidos: string;
+    parentesco?: string;
+  } | null;
+  madre?: {
+    id?: string;
+    dni: string;
+    nombres: string;
+    apellidos: string;
+    parentesco?: string;
+  } | null;
+  deletedMemberIds?: string[];
+}) {
+  try {
+    await ensureSuperAdmin();
+
+    const cleanHijos = (params.hijos || "").trim();
+    if (!cleanHijos) {
+      return { error: "Debe ingresar los apellidos y nombres del estudiante o hijos representados." };
+    }
+
+    const cleanNivel = (params.nivel || "primaria").toLowerCase().trim();
+    const cleanGrado = (params.grado || "").trim();
+    const cleanSeccion = (params.seccion || "").toUpperCase().trim();
+
+    const cleanDniPadre = params.padre?.dni ? params.padre.dni.replace(/\D/g, "").slice(0, 8) : "";
+    const cleanDniMadre = params.madre?.dni ? params.madre.dni.replace(/\D/g, "").slice(0, 8) : "";
+
+    const hasPadre = Boolean(cleanDniPadre && params.padre?.nombres?.trim() && params.padre?.apellidos?.trim());
+    const hasMadre = Boolean(cleanDniMadre && params.madre?.nombres?.trim() && params.madre?.apellidos?.trim());
+
+    if (!hasPadre && !hasMadre) {
+      return { error: "Debe completar los datos (DNI de 8 dígitos, nombres y apellidos) de al menos un apoderado (Padre o Madre)." };
+    }
+
+    if (hasPadre && cleanDniPadre.length !== 8) {
+      return { error: "El DNI del padre debe tener exactamente 8 dígitos numéricos." };
+    }
+
+    if (hasMadre && cleanDniMadre.length !== 8) {
+      return { error: "El DNI de la madre debe tener exactamente 8 dígitos numéricos." };
+    }
+
+    if (hasPadre && hasMadre && cleanDniPadre === cleanDniMadre) {
+      return { error: "El DNI del padre y de la madre no pueden ser iguales." };
+    }
+
+    // Determinar familia_id canónico
+    let targetFamiliaId = params.familiaId?.trim() || "";
+    if (!targetFamiliaId) {
+      targetFamiliaId = `FAM-${cleanDniPadre || cleanDniMadre}`;
+    }
+
+    // 1. Procesar Padre
+    if (hasPadre && params.padre) {
+      const padrePayload = {
+        dni: cleanDniPadre,
+        nombres: params.padre.nombres.trim().toUpperCase(),
+        apellidos: params.padre.apellidos.trim().toUpperCase(),
+        parentesco: params.padre.parentesco || "PADRE",
+        familia_id: targetFamiliaId,
+        hijos: cleanHijos,
+        nivel: cleanNivel,
+        grado: cleanGrado,
+        seccion: cleanSeccion
+      };
+
+      const { data: existingPadre } = await supabaseAdmin
+        .from("apoderados")
+        .select("id, ya_voto")
+        .eq("dni", cleanDniPadre)
+        .maybeSingle();
+
+      if (existingPadre || params.padre.id) {
+        const updateId = params.padre.id || existingPadre?.id;
+        const { error: updErr } = await supabaseAdmin
+          .from("apoderados")
+          .update(padrePayload)
+          .eq("id", updateId);
+        if (updErr) throw updErr;
+      } else {
+        const { error: insErr } = await supabaseAdmin
+          .from("apoderados")
+          .insert({
+            ...padrePayload,
+            ya_voto: false
+          });
+        if (insErr) throw insErr;
+      }
+    }
+
+    // 2. Procesar Madre
+    if (hasMadre && params.madre) {
+      const madrePayload = {
+        dni: cleanDniMadre,
+        nombres: params.madre.nombres.trim().toUpperCase(),
+        apellidos: params.madre.apellidos.trim().toUpperCase(),
+        parentesco: params.madre.parentesco || "MADRE",
+        familia_id: targetFamiliaId,
+        hijos: cleanHijos,
+        nivel: cleanNivel,
+        grado: cleanGrado,
+        seccion: cleanSeccion
+      };
+
+      const { data: existingMadre } = await supabaseAdmin
+        .from("apoderados")
+        .select("id, ya_voto")
+        .eq("dni", cleanDniMadre)
+        .maybeSingle();
+
+      if (existingMadre || params.madre.id) {
+        const updateId = params.madre.id || existingMadre?.id;
+        const { error: updErr } = await supabaseAdmin
+          .from("apoderados")
+          .update(madrePayload)
+          .eq("id", updateId);
+        if (updErr) throw updErr;
+      } else {
+        const { error: insErr } = await supabaseAdmin
+          .from("apoderados")
+          .insert({
+            ...madrePayload,
+            ya_voto: false
+          });
+        if (insErr) throw insErr;
+      }
+    }
+
+    // 3. Sincronizar hijos, grado, sección y nivel en todos los integrantes de esta familia
+    await supabaseAdmin
+      .from("apoderados")
+      .update({
+        hijos: cleanHijos,
+        nivel: cleanNivel,
+        grado: cleanGrado,
+        seccion: cleanSeccion
+      })
+      .eq("familia_id", targetFamiliaId);
+
+    // 4. Si se eliminó algún miembro explícitamente durante la edición
+    if (params.deletedMemberIds && params.deletedMemberIds.length > 0) {
+      await supabaseAdmin
+        .from("apoderados")
+        .delete()
+        .in("id", params.deletedMemberIds);
+    }
+
+    return { success: true, familiaId: targetFamiliaId };
+  } catch (err: any) {
+    return { error: err.message || "Error al guardar los datos de la familia en el padrón." };
+  }
+}
+
+export async function deleteApoderadoAction(apoderadoId: string) {
+  try {
+    await ensureSuperAdmin();
+    if (!apoderadoId) return { error: "ID no proporcionado." };
+    const { error } = await supabaseAdmin
+      .from("apoderados")
+      .delete()
+      .eq("id", apoderadoId);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { error: err.message || "Error al eliminar apoderado." };
   }
 }
 
