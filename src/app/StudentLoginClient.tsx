@@ -147,7 +147,8 @@ export default function StudentLoginClient({ initialVotingMode }: StudentLoginCl
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (dni.length !== 8) return;
+    const cleanInputDni = dni.trim();
+    if (cleanInputDni.length !== 8 && cleanInputDni.length !== 7) return;
 
     setLoading(true);
     setError("");
@@ -170,9 +171,9 @@ export default function StudentLoginClient({ initialVotingMode }: StudentLoginCl
     try {
       let result;
       if (votingMode === "apafa") {
-        result = await loginApafaVoterAction(dni);
+        result = await loginApafaVoterAction(cleanInputDni);
       } else {
-        result = await loginVoterAction(dni);
+        result = await loginVoterAction(cleanInputDni);
       }
       
       if (result?.error) {
@@ -287,7 +288,7 @@ export default function StudentLoginClient({ initialVotingMode }: StudentLoginCl
                       value={dni}
                       onChange={(e) => setDni(e.target.value.replace(/\D/g, '').slice(0, 8))}
                       required
-                      placeholder="8 dígitos"
+                      placeholder="DNI (7 u 8 dígitos)"
                       disabled={loading}
                     />
                   </div>
@@ -300,7 +301,7 @@ export default function StudentLoginClient({ initialVotingMode }: StudentLoginCl
 
                   <button
                     type="submit"
-                    disabled={loading || dni.length !== 8}
+                    disabled={loading || (dni.length !== 8 && dni.length !== 7)}
                     className={`w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:hover:scale-100 text-white py-4 text-lg rounded-2xl font-bold transition-all hover:scale-[1.02] active:scale-[0.98] ${
                       isSimulacroMode 
                         ? 'bg-amber-500 hover:bg-amber-600' 

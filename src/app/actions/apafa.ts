@@ -19,11 +19,24 @@ async function ensureSuperAdmin() {
 
 export async function loginApafaVoterAction(dni: string) {
   try {
-    const cleanDni = dni.trim();
+    const rawClean = (dni || "").replace(/\D/g, "").trim();
+    if (!rawClean) {
+      return { error: "Por favor, ingresa un número de DNI válido." };
+    }
+
+    const padded8 = rawClean.padStart(8, "0");
+    const unpadded = rawClean.replace(/^0+/, "");
+    const rawTrimmed = (dni || "").trim();
+
+    // Buscar por DNI normalizado de 8 dígitos, sin ceros iniciales, o texto original
+    const candidates = Array.from(new Set([rawClean, padded8, unpadded, rawTrimmed])).filter(Boolean);
+    const filterConditions = candidates.map(c => `dni.eq.${c}`).join(",");
+
     const { data, error } = await supabaseAdmin
       .from("apoderados")
       .select("*")
-      .eq("dni", cleanDni)
+      .or(filterConditions)
+      .limit(1)
       .maybeSingle();
 
     if (error) {
@@ -321,9 +334,10 @@ export async function registerManualApoderadoAction(params: {
 }) {
   try {
     await ensureSuperAdmin();
-    const cleanDni = params.dni.replace(/\D/g, "").slice(0, 8);
+    const rawDigits = params.dni.replace(/\D/g, "");
+    const cleanDni = rawDigits.length === 7 ? rawDigits.padStart(8, "0") : rawDigits.slice(0, 8);
     if (cleanDni.length !== 8) {
-      return { error: "El DNI debe tener exactamente 8 dígitos para habilitar su voto." };
+      return { error: "El DNI debe tener 7 u 8 dígitos para habilitar su voto." };
     }
 
     const { data: existing, error: checkErr } = await supabaseAdmin
@@ -873,7 +887,7 @@ export async function uploadPadronApafaAction(apoderadosList: any[]) {
     try {
       const { data: existingList, error: exErr } = await supabaseAdmin
         .from("apoderados")
-        .select("id, dni, familia_id, hijos, ya_voto, voto_emitido_por");
+        .select("id, dni, familia_id, hijos, grado, seccion, nivel, ya_voto, voto_emitido_por");
 
       if (!exErr && existingList) {
         for (const item of existingList) {
@@ -899,19 +913,59 @@ export async function uploadPadronApafaAction(apoderadosList: any[]) {
       // Usar familia_id canónico si algún miembro de la familia ya existía en la BD
       let familiaId = incomingToCanonicalFamiliaId.get(ap.familia_id) || existing?.familia_id || ap.familia_id;
       let hijos = ap.hijos;
+      let grado = ap.grado;
+      let seccion = ap.seccion;
+      let nivel = ap.nivel;
 
       if (existing) {
         // Fusionar la lista de hijos (evitando duplicar cadenas idénticas)
         const currentHijos = (existing.hijos || "").split(";").map((h: string) => h.trim()).filter(Boolean);
         const incomingHijos = (ap.hijos || "").split(";").map((h: string) => h.trim()).filter(Boolean);
-        const uniqueHijos = Array.from(new Set([...currentHijos, ...incomingHijos]));
+        const uniqueHijos = Array.from(new Set([...incomingHijos, ...currentHijos]));
         hijos = uniqueHijos.join("; ") || ap.hijos;
+
+        // Combinar grados únicos
+        const incomingGrados = (ap.grado || "").split(",").map((g: string) => g.trim()).filter(Boolean);
+        const existingGrados = (existing.grado || "").split(",").map((g: string) => g.trim()).filter(Boolean);
+        
+        // Si existingGrados contenía solo "2°" debido a un bug de año previo pero ap no lo incluye, filtrarlo
+        const validExistingGrados = existingGrados.filter((g: string) => {
+          if (g === "2°" && !incomingGrados.includes("2°") && !existing.hijos?.includes("2°")) {
+            return false;
+          }
+          return true;
+        });
+
+        const allGrados = Array.from(new Set([...incomingGrados, ...validExistingGrados]));
+        allGrados.sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0));
+        grado = allGrados.join(", ") || ap.grado;
+
+        // Combinar secciones únicas
+        const incomingSecs = (ap.seccion || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+        const existingSecs = (existing.seccion || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+        const allSecs = Array.from(new Set([...incomingSecs, ...existingSecs])).sort();
+        seccion = allSecs.join(", ") || ap.seccion;
+
+        // Combinar niveles
+        const incomingNiveles = (ap.nivel || "").split(",").map((n: string) => n.trim().toLowerCase()).filter(Boolean);
+        const existingNiveles = (existing.nivel || "").split(",").map((n: string) => n.trim().toLowerCase()).filter(Boolean);
+        const allNiv = new Set([...incomingNiveles, ...existingNiveles]);
+        if (allNiv.has("mixto") || (allNiv.has("primaria") && allNiv.has("secundaria"))) {
+          nivel = "mixto";
+        } else if (allNiv.has("secundaria")) {
+          nivel = "secundaria";
+        } else {
+          nivel = "primaria";
+        }
       }
 
       return {
         ...ap,
         familia_id: familiaId,
         hijos,
+        grado,
+        seccion,
+        nivel,
         ya_voto: existing?.ya_voto ?? ap.ya_voto ?? false,
         voto_emitido_por: existing?.voto_emitido_por ?? null,
       };
@@ -956,20 +1010,31 @@ export async function getPadronApafaAction(params: {
       .select("*", { count: "exact" });
 
     if (params.search && params.search.trim()) {
-      const q = params.search.trim();
-      query = query.or(`dni.ilike.%${q}%,nombres.ilike.%${q}%,apellidos.ilike.%${q}%,hijos.ilike.%${q}%`);
+      const rawQ = params.search.trim();
+      const cleanDigits = rawQ.replace(/\D/g, "");
+      const padded = cleanDigits.length >= 7 ? cleanDigits.padStart(8, "0") : "";
+      if (padded && padded !== rawQ) {
+        query = query.or(`dni.ilike.%${rawQ}%,dni.ilike.%${padded}%,nombres.ilike.%${rawQ}%,apellidos.ilike.%${rawQ}%,hijos.ilike.%${rawQ}%`);
+      } else {
+        query = query.or(`dni.ilike.%${rawQ}%,nombres.ilike.%${rawQ}%,apellidos.ilike.%${rawQ}%,hijos.ilike.%${rawQ}%`);
+      }
     }
 
     if (params.nivel && params.nivel !== "todos") {
-      query = query.eq("nivel", params.nivel.toLowerCase());
+      const niv = params.nivel.toLowerCase();
+      if (niv === "primaria" || niv === "secundaria") {
+        query = query.or(`nivel.eq.${niv},nivel.eq.mixto`);
+      } else {
+        query = query.eq("nivel", niv);
+      }
     }
 
     if (params.grado && params.grado !== "todos") {
-      query = query.eq("grado", params.grado);
+      query = query.ilike("grado", `%${params.grado}%`);
     }
 
     if (params.seccion && params.seccion !== "todos") {
-      query = query.eq("seccion", params.seccion.toUpperCase());
+      query = query.ilike("seccion", `%${params.seccion.toUpperCase()}%`);
     }
 
     query = query
@@ -1041,22 +1106,25 @@ export async function saveFamilyApoderadosAction(params: {
     const cleanGrado = (params.grado || "").trim();
     const cleanSeccion = (params.seccion || "").toUpperCase().trim();
 
-    const cleanDniPadre = params.padre?.dni ? params.padre.dni.replace(/\D/g, "").slice(0, 8) : "";
-    const cleanDniMadre = params.madre?.dni ? params.madre.dni.replace(/\D/g, "").slice(0, 8) : "";
+    const rawDniPadre = params.padre?.dni ? params.padre.dni.replace(/\D/g, "") : "";
+    const cleanDniPadre = rawDniPadre.length === 7 ? rawDniPadre.padStart(8, "0") : rawDniPadre.slice(0, 8);
+
+    const rawDniMadre = params.madre?.dni ? params.madre.dni.replace(/\D/g, "") : "";
+    const cleanDniMadre = rawDniMadre.length === 7 ? rawDniMadre.padStart(8, "0") : rawDniMadre.slice(0, 8);
 
     const hasPadre = Boolean(cleanDniPadre && params.padre?.nombres?.trim() && params.padre?.apellidos?.trim());
     const hasMadre = Boolean(cleanDniMadre && params.madre?.nombres?.trim() && params.madre?.apellidos?.trim());
 
     if (!hasPadre && !hasMadre) {
-      return { error: "Debe completar los datos (DNI de 8 dígitos, nombres y apellidos) de al menos un apoderado (Padre o Madre)." };
+      return { error: "Debe completar los datos (DNI de 7 u 8 dígitos, nombres y apellidos) de al menos un apoderado (Padre o Madre)." };
     }
 
     if (hasPadre && cleanDniPadre.length !== 8) {
-      return { error: "El DNI del padre debe tener exactamente 8 dígitos numéricos." };
+      return { error: "El DNI del padre debe tener 7 u 8 dígitos numéricos." };
     }
 
     if (hasMadre && cleanDniMadre.length !== 8) {
-      return { error: "El DNI de la madre debe tener exactamente 8 dígitos numéricos." };
+      return { error: "El DNI de la madre debe tener 7 u 8 dígitos numéricos." };
     }
 
     if (hasPadre && hasMadre && cleanDniPadre === cleanDniMadre) {

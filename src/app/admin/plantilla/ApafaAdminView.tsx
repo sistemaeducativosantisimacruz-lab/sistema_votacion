@@ -1110,17 +1110,17 @@ export default function ApafaAdminView({
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const data = await new Promise<string | ArrayBuffer>((resolve, reject) => {
+        const data = await new Promise<ArrayBuffer>((resolve, reject) => {
           const reader = new FileReader();
-          reader.onload = (evt) => resolve(evt.target?.result as string | ArrayBuffer);
+          reader.onload = (evt) => resolve(evt.target?.result as ArrayBuffer);
           reader.onerror = reject;
-          reader.readAsBinaryString(file);
+          reader.readAsArrayBuffer(file);
         });
         fileBuffers.push({ name: file.name, data });
       }
 
       // Parsear todos los archivos simultáneamente (Primaria y/o Secundaria)
-      const parseResult = parseApafaWorkbooks(fileBuffers.map(f => f.data));
+      const parseResult = parseApafaWorkbooks(fileBuffers);
 
       if (parseResult.apoderados.length === 0) {
         throw new Error("No se encontraron registros válidos de padres/madres en los archivos Excel.");
