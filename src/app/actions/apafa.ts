@@ -882,20 +882,51 @@ export async function uploadPadronApafaAction(apoderadosList: any[]) {
       throw new Error("No hay registros de apoderados válidos para cargar.");
     }
 
-    // 1. Obtener apoderados ya existentes en la BD para fusionar inteligentemente (ej. Primaria + Secundaria)
+    // 1. Obtener votos emitidos y TODOS los apoderados existentes (paginando para no topar el límite de 1000 de Supabase)
     const existingMap = new Map<string, any>();
-    try {
-      const { data: existingList, error: exErr } = await supabaseAdmin
-        .from("apoderados")
-        .select("id, dni, familia_id, hijos, grado, seccion, nivel, ya_voto, voto_emitido_por");
+    const votedFamiliaIds = new Set<string>();
+    const votedInfoByFamily = new Map<string, string>();
 
-      if (!exErr && existingList) {
-        for (const item of existingList) {
-          existingMap.set(item.dni, item);
+    try {
+      // 1.1 Identificar familias que ya votaron en la tabla independiente de votos_apafa
+      const { data: votosList } = await supabaseAdmin
+        .from("votos_apafa")
+        .select("familia_id");
+
+      if (votosList) {
+        for (const v of votosList) {
+          if (v.familia_id) votedFamiliaIds.add(v.familia_id);
         }
       }
+
+      // 1.2 Cargar todos los registros existentes paginando de 1000 en 1000
+      let from = 0;
+      const step = 1000;
+      while (true) {
+        const { data: chunk, error: exErr } = await supabaseAdmin
+          .from("apoderados")
+          .select("id, dni, familia_id, hijos, grado, seccion, nivel, ya_voto, voto_emitido_por")
+          .range(from, from + step - 1);
+
+        if (exErr || !chunk || chunk.length === 0) break;
+
+        for (const item of chunk) {
+          existingMap.set(item.dni, item);
+          if (item.ya_voto) {
+            if (item.familia_id) {
+              votedFamiliaIds.add(item.familia_id);
+              if (item.voto_emitido_por) {
+                votedInfoByFamily.set(item.familia_id, item.voto_emitido_por);
+              }
+            }
+          }
+        }
+
+        if (chunk.length < step) break;
+        from += step;
+      }
     } catch (e) {
-      // Ignorar si aún no existe la tabla
+      console.warn("Aviso al consultar apoderados existentes:", e);
     }
 
     // 2. Mapear incoming familia_id a canonical existing familia_id si alguno de los miembros ya existe en BD
@@ -907,7 +938,7 @@ export async function uploadPadronApafaAction(apoderadosList: any[]) {
       }
     }
 
-    // 3. Fusionar datos entrantes con existentes
+    // 3. Fusionar datos entrantes con existentes garantizando que NINGÚN voto previo se pierda
     const mergedList = apoderadosList.map(ap => {
       const existing = existingMap.get(ap.dni);
       // Usar familia_id canónico si algún miembro de la familia ya existía en la BD
@@ -959,15 +990,29 @@ export async function uploadPadronApafaAction(apoderadosList: any[]) {
         }
       }
 
+      // Verificación estricta de voto previo por DNI o por Grupo Familiar
+      const hasVoted = Boolean(
+        existing?.ya_voto ||
+        votedFamiliaIds.has(familiaId) ||
+        (existing?.familia_id && votedFamiliaIds.has(existing.familia_id)) ||
+        (ap.familia_id && votedFamiliaIds.has(ap.familia_id))
+      );
+
+      const voteInfo = existing?.voto_emitido_por || 
+        votedInfoByFamily.get(familiaId) || 
+        (existing?.familia_id ? votedInfoByFamily.get(existing.familia_id) : null) || 
+        (hasVoted ? "Voto de familia ya emitido" : null);
+
       return {
         ...ap,
+        id: existing?.id, // Mantener el mismo UUID en la base de datos si ya existía
         familia_id: familiaId,
         hijos,
         grado,
         seccion,
         nivel,
-        ya_voto: existing?.ya_voto ?? ap.ya_voto ?? false,
-        voto_emitido_por: existing?.voto_emitido_por ?? null,
+        ya_voto: hasVoted,
+        voto_emitido_por: voteInfo,
       };
     });
 
