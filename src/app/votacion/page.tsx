@@ -237,14 +237,14 @@ export default function VotacionPage() {
                 <p className="text-xs text-muted-foreground uppercase tracking-wider">DNI</p>
                 <p className="font-semibold">{user.dni}</p>
               </div>
-              <div className="bg-secondary/50 px-4 py-2 rounded-xl">
-                <p className="text-xs text-muted-foreground uppercase tracking-wider">
-                  {isApafa ? "Hijo(s) Representado(s)" : "Grado y Sección"}
-                </p>
-                <p className="font-semibold">
-                  {user.grado} {user.seccion ? `"${user.seccion}"` : ""} {user.nivel ? `- ${user.nivel}` : ""}
-                </p>
-              </div>
+              {!isApafa && (
+                <div className="bg-secondary/50 px-4 py-2 rounded-xl">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wider">Grado y Sección</p>
+                  <p className="font-semibold">
+                    {user.grado} {user.seccion ? `"${user.seccion}"` : ""} {user.nivel ? `- ${user.nivel}` : ""}
+                  </p>
+                </div>
+              )}
             </div>
           </section>
         )}
